@@ -490,6 +490,15 @@ def init_db():
         _seed()
 
 
+def reset_db():
+    """Wipe everything and reseed, for demo retakes."""
+    with closing(_conn()) as c:
+        c.execute("DELETE FROM approvals")
+        c.execute("DELETE FROM rules")
+        c.commit()
+    _seed()
+
+
 def _seed():
     now = _iso(_now())
     _exec("INSERT INTO rules VALUES (?,?,?,?,?,?,?,?)",

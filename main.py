@@ -179,6 +179,13 @@ async def grant_policy(rule_id: str):
     return rule
 
 
+@app.post("/demo/reset", dependencies=[Depends(require_key)])
+async def demo_reset():
+    core.reset_db()
+    publish("reset", {})
+    return {"status": "reset"}
+
+
 @app.get("/events")
 async def events(request: Request):
     q = asyncio.Queue(maxsize=100)

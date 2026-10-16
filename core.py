@@ -4,6 +4,7 @@ Mandate never makes a judgment call. It routes: rules a human granted
 auto-approve, everything else escalates to a human. The LLM only explains.
 (The learning engine arrives in Phase 4.)
 """
+import fnmatch
 import hashlib
 import hmac
 import json
@@ -103,6 +104,7 @@ def _present_rule(row):
     out["conditions"] = json.loads(out.pop("conditions_json") or "{}")
     out["pitch"] = out["conditions"].pop("pitch", None)
     out["description"] = describe_conditions(out["conditions"])
+    out["spec"] = normalize_conditions(out["conditions"])
     return out
 
 
@@ -267,54 +269,263 @@ def explain(action_type, payload, context, risk):
 
 # ---------------------------------------------------------------- policy engine
 
-def describe_conditions(cond):
-    parts = []
+# A rule is: who (agent / source) + what (action_type) + when (conds) -> then (action), with an
+# optional daily_cap on auto-approvals. Older rules stored flat keys (amount_lt, ...); they are
+# normalized here, so learned and seeded rules keep working unchanged.
+
+ACTIONS = ("auto_approve", "always_ask", "never_allow")
+OPS = ("lt", "lte", "gt", "gte", "eq", "neq", "contains", "not_contains", "matches", "is_read_only")
+OP_WORDS = {"lt": "under", "lte": "at most", "gt": "over", "gte": "at least", "eq": "is", "neq": "is not",
+            "contains": "contains", "not_contains": "doesn't contain", "matches": "matches"}
+LEGACY = {"amount_lt": "amount", "order_age_days_lt": "order_age_days", "recipients_lt": "recipients"}
+FIELD_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+
+
+def normalize_conditions(cond):
+    cond = cond or {}
+    conds = [dict(c) for c in cond.get("conds") or []]
+    for key, field in LEGACY.items():
+        if key in cond:
+            conds.append({"field": field, "op": "lt", "value": cond[key]})
     if cond.get("readonly_command"):
-        return "read-only shell commands (ls, cat, grep, git status/log/diff…)"
-    if cond.get("action_type"):
-        parts.append(cond["action_type"].replace("_", " "))
-    if "amount_lt" in cond:
-        parts.append(f"amount under ${cond['amount_lt']:,.0f}")
-    if "order_age_days_lt" in cond:
-        parts.append(f"order under {cond['order_age_days_lt']:.0f} days old")
-    if "recipients_lt" in cond:
-        parts.append(f"under {cond['recipients_lt']:.0f} recipients")
-    return ", ".join(parts) or "any action"
+        conds.append({"field": "command", "op": "is_read_only"})
+    return {"action_type": cond.get("action_type") or None, "agent": cond.get("agent") or None,
+            "source": cond.get("source") or None, "daily_cap": _num(cond.get("daily_cap")), "conds": conds}
 
 
-def rule_matches(cond, action_type, payload, context):
-    if cond.get("action_type") and cond["action_type"] != action_type:
+def _field(name, payload, context):
+    payload, context = payload or {}, context or {}
+    return payload[name] if name in payload else context.get(name)
+
+
+def _cond_true(c, payload, context):
+    v, op, target = _field(c.get("field", ""), payload, context), c.get("op"), c.get("value")
+    if op == "is_read_only":
+        return is_readonly_command(v)
+    if v is None:
         return False
-    if cond.get("readonly_command") and not (
-            action_type == "run_command" and is_readonly_command((payload or {}).get("command"))):
+    if op in ("lt", "lte", "gt", "gte"):
+        a, b = _num(v), _num(target)
+        if a is None or b is None:
+            return False
+        return {"lt": a < b, "lte": a <= b, "gt": a > b, "gte": a >= b}[op]
+    if op in ("eq", "neq"):
+        a, b = _num(v), _num(target)
+        same = a == b if a is not None and b is not None else str(v).strip().lower() == str(target).strip().lower()
+        return same if op == "eq" else not same
+    text, needle = str(v).lower(), str(target or "").lower()
+    if op == "contains":
+        return needle in text
+    if op == "not_contains":
+        return needle not in text
+    if op == "matches":  # glob; "config/*" also matches ".../config/x" in absolute paths
+        text = text.replace("\\", "/")
+        return fnmatch.fnmatch(text, needle) or fnmatch.fnmatch(text, "*/" + needle.lstrip("/"))
+    return False
+
+
+def describe_conditions(cond):
+    n = normalize_conditions(cond)
+    parts = [n["action_type"].replace("_", " ") if n["action_type"] else "any action"]
+    if n["agent"]:
+        parts.append(f"only agent {n['agent']}")
+    if n["source"]:
+        parts.append(f"only {n['source'].replace('_', ' ')} agents")
+    for c in n["conds"]:
+        if c["op"] == "is_read_only":
+            parts.append("read-only shell commands (ls, cat, grep, git status/log/diff…)")
+            continue
+        v, f = c.get("value"), c["field"]
+        n_ = _num(v) if c["op"] in ("lt", "lte", "gt", "gte", "eq", "neq") else None
+        if f == "amount" and n_ is not None:
+            v = f"${n_:,.0f}"
+        elif f.endswith("_days") and n_ is not None:
+            v = f"{n_:,.0f} days"
+        elif n_ is not None:
+            v = f"{n_:,.0f}" if n_ == int(n_) else f"{n_:,}"
+        label = {"order_age_days": "order age", "file_path": "file path"}.get(f, f.replace("_", " "))
+        parts.append(f"{label} {OP_WORDS.get(c['op'], c['op'])} {v}")
+    if n["daily_cap"]:
+        parts.append(f"up to ${n['daily_cap']:,.0f}/day")
+    return " · ".join(parts)
+
+
+def rule_matches(cond, action_type, payload, context, agent=None, source=None):
+    n = normalize_conditions(cond)
+    if n["action_type"] and n["action_type"] != action_type:
         return False
-    if "amount_lt" in cond:
-        amount = _num((payload or {}).get("amount"))
-        if amount is None or not amount < cond["amount_lt"]:
-            return False
-    if "order_age_days_lt" in cond:
-        age = _num((context or {}).get("order_age_days"))
-        if age is None or not age < cond["order_age_days_lt"]:
-            return False
-    if "recipients_lt" in cond:
-        n = _num((context or {}).get("recipients"))
-        if n is None or not n < cond["recipients_lt"]:
-            return False
-    return True
+    if n["agent"] and n["agent"] != agent:
+        return False
+    if n["source"] and n["source"] != source:
+        return False
+    return all(_cond_true(c, payload, context) for c in n["conds"])
 
 
-def evaluate(action_type, payload, context, risk):
-    """Returns ("auto", rule) or ("escalate", rule_or_None). Never judges, only routes."""
-    rules = _query("SELECT * FROM rules WHERE active=1")
+def _spent_today(rule_id):
+    """Total amount this rule auto-approved since midnight UTC."""
+    start = _iso(_now().replace(hour=0, minute=0, second=0, microsecond=0))
+    rows = _query("SELECT payload_json FROM approvals WHERE rule_id=? AND status='auto_approved' AND created_at>=?",
+                  (rule_id, start))
+    return sum(_num(json.loads(r["payload_json"]).get("amount")) or 0 for r in rows)
+
+
+def evaluate(action_type, payload, context, risk, agent=None, source=None):
+    """Returns (verdict, rule, note): verdict is "deny", "escalate" or "auto". Never judges, only routes:
+    never_allow beats hard floors and always_ask, which beat auto_approve."""
+    rules = _query("SELECT * FROM rules WHERE active=1 ORDER BY created_at, rowid")
+    hits = {a: [] for a in ACTIONS}
     for r in rules:
         r["conditions"] = json.loads(r["conditions_json"])
-    ask = next((r for r in rules if r["action"] == "always_ask"
-                and rule_matches(r["conditions"], action_type, payload, context)), None)
-    if risk["floor"] or ask:
-        return "escalate", ask
-    auto = next((r for r in rules if r["action"] == "auto_approve"
-                 and rule_matches(r["conditions"], action_type, payload, context)), None)
-    return ("auto", auto) if auto else ("escalate", None)
+        if r["action"] in hits and rule_matches(r["conditions"], action_type, payload, context, agent, source):
+            hits[r["action"]].append(r)
+    if hits["never_allow"]:
+        return "deny", hits["never_allow"][0], None
+    if risk["floor"] or hits["always_ask"]:
+        return "escalate", (hits["always_ask"] or [None])[0], None
+    note, amount = None, _num((payload or {}).get("amount"))
+    for r in hits["auto_approve"]:
+        cap = normalize_conditions(r["conditions"])["daily_cap"]
+        if cap and amount is not None:
+            spent = _spent_today(r["id"])
+            if spent + amount > cap:
+                note = f"Daily cap: {r['name']} already auto-approved ${spent:,.0f} of ${cap:,.0f} today"
+                continue
+        return "auto", r, None
+    return "escalate", None, note
+
+
+def _clean_rule(data):
+    """Validate a rule from the builder. Returns (name, action, conditions); ValueError if bad."""
+    name = str(data.get("name") or "").strip()[:80]
+    action = data.get("action")
+    if not name:
+        raise ValueError("give the mandate a name")
+    if action not in ACTIONS:
+        raise ValueError("action must be auto_approve, always_ask or never_allow")
+    raw = data.get("conditions") or {}
+    cond = {}
+    for key in ("action_type", "agent"):
+        val = str(raw.get(key) or "").strip()
+        if val:
+            if len(val) > 60:
+                raise ValueError(f"{key} is too long")
+            cond[key] = val
+    if raw.get("source"):
+        if raw["source"] not in SOURCES:
+            raise ValueError("unknown source")
+        cond["source"] = raw["source"]
+    cap = _num(raw.get("daily_cap"))
+    if cap:
+        if action != "auto_approve" or cap <= 0:
+            raise ValueError("a daily cap only applies to auto-approve mandates and must be positive")
+        cond["daily_cap"] = cap
+    conds = []
+    for c in (raw.get("conds") or [])[:8]:
+        field, op = str(c.get("field") or "").strip().lower(), c.get("op")
+        if not FIELD_RE.match(field) or op not in OPS:
+            raise ValueError(f"bad condition: {field or '?'} {op or '?'}")
+        item = {"field": field, "op": op}
+        if op != "is_read_only":
+            val = c.get("value")
+            if val is None or str(val).strip() == "":
+                raise ValueError(f"condition on {field} needs a value")
+            if op in ("lt", "lte", "gt", "gte") and _num(val) is None:
+                raise ValueError(f"{field} {OP_WORDS[op]} needs a number")
+            item["value"] = _num(val) if op in ("lt", "lte", "gt", "gte") else str(val).strip()[:200]
+        conds.append(item)
+    if conds:
+        cond["conds"] = conds
+    if not cond.get("action_type") and not conds and action != "always_ask":
+        raise ValueError("an auto-approve or never-allow mandate needs an action type or a condition")
+    return name, action, cond
+
+
+DRAFT_PROMPT = """You turn a business owner's policy, written in plain English, into ONE rule for Mandate, an approval
+layer for AI agents. You only translate; a human reviews and grants the rule. Return only JSON:
+{"name": "short title, max 60 chars",
+ "action": "auto_approve" | "always_ask" | "never_allow",
+ "conditions": {"action_type": "<one action type or null>", "agent": "<agent name or null>",
+                "daily_cap": <number or null, only for auto_approve>,
+                "conds": [{"field": "<field>", "op": "<op>", "value": <number or string>}]},
+ "unsupported": "anything in the policy this rule cannot express, or empty string"}
+Ops: lt, lte, gt, gte (numbers), eq, neq, contains, not_contains, matches (glob such as config/payments/*),
+is_read_only (only for field command, no value).
+Known action types and their fields:
+- issue_refund: amount (USD), order_id, reason; context: order_age_days, policy_limit_days, prior_refunds_60d, customer
+- email_customer: email, subject, body; context: recipients
+- delete_account: user_id
+- run_command: command (shell command text)
+- write_file: file_path, content
+Other action types seen recently: {types}. Known agents: {agents}.
+Rules: "don't let / never / block" -> never_allow. "always check with me / ask me first" -> always_ask.
+"let agents do X on their own / auto-approve / no need to ask" -> auto_approve. A limit like "up to $X per day" is
+daily_cap. "refunds over $X need me" -> always_ask with amount gt X. Use exact numbers from the text. Prefer known
+fields; never invent agents. If nothing can be expressed, still return your best rule and explain in "unsupported"."""
+
+
+def draft_rule(text):
+    """AI drafts a rule from plain English. Returns {"rule": {...}, "description", "unsupported"}.
+    Nothing is saved: a human reviews it in the builder. ValueError if it can't be drafted."""
+    text = (text or "").strip()
+    if len(text) < 8:
+        raise ValueError("describe the policy in a sentence")
+    key = os.environ.get("GROQ_API_KEY")
+    if not key:
+        raise ValueError("the AI drafter needs GROQ_API_KEY on the server; fill in the rule by hand")
+    types = sorted({r["action_type"] for r in _query("SELECT DISTINCT action_type FROM approvals")} - set(IRREVERSIBILITY))
+    agents_ = [r["agent"] for r in _query("SELECT DISTINCT agent FROM approvals")]
+    prompt = DRAFT_PROMPT.replace("{types}", ", ".join(types) or "none").replace("{agents}", ", ".join(agents_) or "none")
+    try:
+        from groq import Groq
+
+        client = Groq(api_key=key, timeout=12, max_retries=1)
+        resp = client.chat.completions.create(
+            model=GROQ_MODEL, temperature=0, max_tokens=900,
+            response_format={"type": "json_object"}, extra_body={"reasoning_effort": "low"},
+            messages=[{"role": "system", "content": prompt}, {"role": "user", "content": text[:600]}])
+        data = json.loads(resp.choices[0].message.content)
+    except Exception as e:
+        raise ValueError(f"the AI drafter is unavailable right now ({type(e).__name__}); fill in the rule by hand")
+    cond = data.get("conditions") or {}
+    cond["conds"] = [{k: v for k, v in c.items() if v is not None} for c in cond.get("conds") or [] if isinstance(c, dict)]
+    if cond.get("agent") and cond["agent"] not in agents_:
+        cond["agent"] = None  # never invent agents
+    rule = {"name": data.get("name"), "action": data.get("action"), "conditions": cond}
+    try:
+        name, action, clean = _clean_rule(rule)
+    except ValueError as e:
+        raise ValueError(f"the AI's draft wasn't a valid rule ({e}); try rephrasing or fill it in by hand")
+    return {"rule": {"name": name, "action": action, "conditions": clean, "spec": normalize_conditions(clean)},
+            "description": describe_conditions(clean), "unsupported": str(data.get("unsupported") or "")[:300]}
+
+
+def save_rule(rule_id, data):
+    """Create (rule_id=None) or update a rule. KeyError if it doesn't exist."""
+    name, action, cond = _clean_rule(data)
+    if rule_id:
+        if not _query("SELECT 1 FROM rules WHERE id=? AND source NOT IN ('proposed','dismissed')", (rule_id,)):
+            raise KeyError(rule_id)
+        _exec("UPDATE rules SET name=?, action=?, conditions_json=? WHERE id=?",
+              (name, action, json.dumps(cond), rule_id))
+        if data.get("active") is not None:
+            _exec("UPDATE rules SET active=? WHERE id=?", (1 if data["active"] else 0, rule_id))
+    else:
+        rule_id = (re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:32] or "mandate") + "-" + uuid.uuid4().hex[:4]
+        _exec("INSERT INTO rules VALUES (?,?,?,?,?,?,?,?)",
+              (rule_id, name, json.dumps(cond), action, "custom", 0, 1, _iso(_now())))
+    return _present_rule(_query("SELECT * FROM rules WHERE id=?", (rule_id,))[0])
+
+
+def set_rule_active(rule_id, active):
+    if not _exec("UPDATE rules SET active=? WHERE id=? AND source NOT IN ('proposed','dismissed')",
+                 (1 if active else 0, rule_id)):
+        raise KeyError(rule_id)
+    return _present_rule(_query("SELECT * FROM rules WHERE id=?", (rule_id,))[0])
+
+
+def delete_rule(rule_id):
+    if not _exec("DELETE FROM rules WHERE id=? AND source NOT IN ('proposed','dismissed')", (rule_id,)):
+        raise KeyError(rule_id)
 
 
 def autonomy_score():
@@ -330,7 +541,10 @@ def policies():
              _query("SELECT * FROM rules WHERE active=1 ORDER BY created_at, rowid")]
     proposals = [_present_rule(r) for r in
                  _query("SELECT * FROM rules WHERE source='proposed' AND active=0 ORDER BY created_at DESC")]
-    return {"rules": rules, "proposals": proposals, "autonomy_score": autonomy_score()}
+    disabled = [_present_rule(r) for r in
+                _query("SELECT * FROM rules WHERE active=0 AND source NOT IN ('proposed','dismissed') "
+                       "ORDER BY created_at, rowid")]
+    return {"rules": rules, "proposals": proposals, "disabled": disabled, "autonomy_score": autonomy_score()}
 
 
 def grant_rule(rule_id):
@@ -485,33 +699,38 @@ def create_approval(agent, action_type, payload, context, reasoning="", callback
     if source not in SOURCES:
         source = "http"
     risk = score_risk(action_type, payload, context)
-    verdict, rule = evaluate(action_type, payload, context, risk)
-    auto = verdict == "auto"
-    # Auto-approvals stay instant; the LLM only explains what a human will look at.
-    expl = (explain(action_type, payload, context, risk) if auto
+    verdict, rule, note = evaluate(action_type, payload, context, risk, agent, source)
+    auto, deny = verdict == "auto", verdict == "deny"
+    # Rule outcomes stay instant; the LLM only explains what a human will look at.
+    expl = (explain(action_type, payload, context, risk) if auto or deny
             else llm_explain(action_type, payload, context, reasoning, risk))
     reasons = expl["reasons"]
     if risk["floor"] and not auto:
         floor = next(s for s in risk["signals"] if s.startswith("Hard floor"))
         if floor not in reasons:
             reasons = [floor] + reasons[:3]
-    if verdict == "escalate" and rule:
+    if deny:
+        reasons = [f"Blocked by policy: {rule['name']}"] + reasons[:3]
+    elif verdict == "escalate" and rule:
         reasons = [f"Policy: {rule['name']}"] + reasons[:3]
+    if note:
+        reasons = [note] + reasons[:3]
+    decided = auto or deny
     now = _iso(_now())
     row = {
         "id": "apr_" + uuid.uuid4().hex[:8], "agent": agent, "action_type": action_type,
         "payload_json": json.dumps(payload), "context_json": json.dumps(context),
         "reasoning": reasoning or "", "risk_score": risk["score"],
         "risk_reasons_json": json.dumps(reasons), "impact_if_wrong": expl["impact_if_wrong"],
-        "status": "auto_approved" if auto else "pending",
-        "decided_by": "rule" if auto else None, "decided_at": now if auto else None,
+        "status": "auto_approved" if auto else "denied" if deny else "pending",
+        "decided_by": "rule" if decided else None, "decided_at": now if decided else None,
         "final_payload_json": json.dumps(payload) if auto else None,
-        "rule_id": rule["id"] if auto else None, "callback_url": callback_url,
+        "rule_id": rule["id"] if decided else None, "callback_url": callback_url,
         "timeout_seconds": timeout_seconds, "on_timeout": on_timeout,
         "created_at": created_at or now, "source": source,
     }
     _insert_approval(row)
-    if auto:
+    if decided:
         _exec("UPDATE rules SET times_used = times_used + 1 WHERE id=?", (rule["id"],))
     return get_approval(row["id"])
 
@@ -681,7 +900,7 @@ def _seed():
     now = _iso(_now())
     _exec("INSERT INTO rules VALUES (?,?,?,?,?,?,?,?)",
           ("small-refund-30d", "Auto-approve refunds under $50 within 30 days",
-           json.dumps({"action_type": "issue_refund", "amount_lt": 50, "order_age_days_lt": 30}),
+           json.dumps({"action_type": "issue_refund", "amount_lt": 50, "order_age_days_lt": 30, "daily_cap": 500}),
            "auto_approve", "seed", 0, 1, now))
     _exec("INSERT INTO rules VALUES (?,?,?,?,?,?,?,?)",
           ("ask-delete-account", "Always ask before deleting an account",
@@ -690,6 +909,11 @@ def _seed():
           ("readonly-commands", "Auto-approve read-only shell commands",
            json.dumps({"action_type": "run_command", "readonly_command": True}),
            "auto_approve", "seed", 0, 1, now))
+    _exec("INSERT INTO rules VALUES (?,?,?,?,?,?,?,?)",
+          ("no-payment-config", "Never let agents edit payment config",
+           json.dumps({"action_type": "write_file",
+                       "conds": [{"field": "file_path", "op": "matches", "value": "config/payments/*"}]}),
+           "never_allow", "seed", 0, 1, now))
 
     # (agent, action, payload, context, reasoning, status, decided_by, hours_ago, latency_s, final)
     history = [

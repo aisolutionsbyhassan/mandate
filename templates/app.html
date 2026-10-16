@@ -304,6 +304,57 @@
   .rule .cond { color: var(--muted); font-size: 13px; }
   .rule .meta { display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; justify-content: flex-end; }
 
+  .rule .ri.never { background: var(--red-bg); color: var(--red-2); }
+  .pill.never { color: var(--red-2); background: var(--red-bg); border-color: var(--red-line); }
+  .pill.custom { color: var(--blue-2); background: var(--sky); border-color: #C9D8FF; }
+  .rule .ctrl { display: flex; align-items: center; gap: 4px; margin-left: 6px; }
+  .icon-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+  .icon-btn:hover { background: var(--panel-2); border-color: var(--line); color: var(--ink); }
+  .icon-btn.del:hover { color: var(--red-2); background: var(--red-bg); border-color: var(--red-line); }
+  .icon-btn svg { width: 16px; height: 16px; pointer-events: none; }
+  .switch { width: 36px; height: 20px; border-radius: 999px; background: #D5DEEB; position: relative; cursor: pointer; border: 0; flex-shrink: 0; transition: background .15s; }
+  .switch::after { content: ""; position: absolute; width: 16px; height: 16px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: left .15s; box-shadow: 0 1px 3px rgba(10,24,48,.3); }
+  .switch.on { background: var(--teal); }
+  .switch.on::after { left: 18px; }
+  #disabledRules .rule { opacity: .65; }
+
+  .builder { max-width: 720px; }
+  .builder .fld { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 16px; }
+  .builder .opt { font-weight: 500; color: var(--faint); margin-left: 4px; }
+  .builder .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .builder .err { color: var(--red-2); background: var(--red-bg); border: 1px solid var(--red-line); border-radius: 9px; padding: 8px 12px; font-size: 13px; margin-bottom: 14px; }
+  .outcomes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 6px; }
+  .outcomes button { text-align: left; border: 1px solid var(--line-2); background: #fff; border-radius: 11px; padding: 10px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 1px; }
+  .outcomes button b { font-size: 14px; color: var(--ink); }
+  .outcomes button span { font-size: 12px; color: var(--muted); font-weight: 500; }
+  .outcomes .o-auto.active { border-color: var(--green); background: var(--green-bg); box-shadow: 0 0 0 3px rgba(18,148,90,.12); }
+  .outcomes .o-ask.active { border-color: var(--amber); background: var(--amber-bg); box-shadow: 0 0 0 3px rgba(199,119,0,.12); }
+  .outcomes .o-never.active { border-color: var(--red); background: var(--red-bg); box-shadow: 0 0 0 3px rgba(229,72,77,.12); }
+  .crow { display: grid; grid-template-columns: 1.1fr .9fr 1.2fr 30px; gap: 8px; align-items: center; margin: 6px 0; }
+  .crow input, .crow select { margin-top: 0; }
+  select { appearance: auto; }
+  .money { display: flex; align-items: center; gap: 0; margin-top: 5px; max-width: 240px; }
+  .money i { font-style: normal; padding: 9px 11px; border: 1px solid var(--line-2); border-right: 0; border-radius: 9px 0 0 9px; background: var(--panel-2); color: var(--muted); }
+  .money input { margin-top: 0; border-radius: 0 9px 9px 0; }
+  .ai-box { border-radius: 14px; padding: 14px; margin-bottom: 18px; border: 1px solid #C9D8FF;
+            background: radial-gradient(120% 140% at 100% 0%, #E3F7F4 0%, transparent 55%), linear-gradient(180deg, #F2F6FF, #fff); }
+  .ai-head { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--blue-2); margin-bottom: 8px; flex-wrap: wrap; }
+  .ai-head svg { width: 16px; height: 16px; }
+  .ai-row { display: flex; gap: 8px; align-items: stretch; }
+  .ai-row textarea { margin-top: 0; min-height: 52px; font-family: var(--sans); font-size: 14px; }
+  .ai-row .btn { flex-shrink: 0; }
+  .ai-note { margin-top: 10px; font-size: 13px; padding: 9px 12px; border-radius: 9px; background: var(--green-bg); color: #0D5E3A; border: 1px solid #C5EBD6; }
+  .ai-note.warn { background: var(--amber-bg); color: #7A4A00; border-color: #F6DDAE; }
+  .ai-note.bad { background: var(--red-bg); color: #7A1C1F; border-color: var(--red-line); }
+  @media (max-width: 640px) { .ai-row { flex-direction: column; } }
+  .preview { border-radius: 12px; padding: 12px 14px; background: var(--panel-2); border: 1px dashed var(--line-2); font-size: 13.5px; color: var(--ink-2); margin: 4px 0 18px; }
+  .preview b.auto { color: var(--green); } .preview b.ask { color: var(--amber); } .preview b.never { color: var(--red-2); }
+  @media (max-width: 640px) {
+    .builder .row2, .outcomes { grid-template-columns: 1fr; }
+    .crow { grid-template-columns: 1fr 1fr 30px; }
+    .crow input.cv { grid-column: 1 / 3; }
+  }
+
   /* ---------- history ---------- */
   .table-wrap { overflow-x: auto; padding: 0; }
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; white-space: nowrap; }
@@ -524,8 +575,13 @@
           <div id="proposals"></div>
         </div>
         <div class="section">
-          <div class="sec-head"><div><h2 class="sec-title">Active mandates</h2><div class="desc">Hard floors (account deletion, refunds over $500, rm -rf, force pushes, secrets) always go to a human, whatever the rules say.</div></div></div>
+          <div class="sec-head"><div><h2 class="sec-title">Active mandates</h2><div class="desc">Checked in order: <b>never allow</b> first, then hard floors and <b>always ask</b>, then <b>auto-approve</b>. Hard floors (account deletion, refunds over $500, rm -rf, force pushes, secrets) always reach a human unless a never-allow rule blocks them outright.</div></div>
+            <button class="btn primary" id="newRule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>New mandate</button></div>
           <div class="panel rules" id="rules"></div>
+        </div>
+        <div class="section hidden" id="disabledWrap">
+          <div class="sec-head"><div><h2 class="sec-title">Disabled</h2><div class="desc">Switched off. Mandate ignores these until you turn them back on.</div></div></div>
+          <div class="panel rules" id="disabledRules"></div>
         </div>
       </section>
 
@@ -552,6 +608,44 @@
     <div id="wizBody"></div>
   </div>
 </div>
+
+<div class="modal hidden" id="ruleModal">
+  <form class="wizard builder" id="ruleForm" autocomplete="off">
+    <div class="wizard-head"><h3 id="ruleTitle">New mandate</h3><button class="x" type="button" data-close-rule aria-label="Close">×</button></div>
+    <p>Tell Mandate what to do when an agent wants to act. Mandate applies the rule exactly as written; it never judges.</p>
+    <div class="ai-box" id="aiBox">
+      <div class="ai-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/></svg>Describe it in plain English <span class="opt">the AI drafts the rule; you review and grant it</span></div>
+      <div class="ai-row">
+        <textarea id="aiText" rows="2" placeholder="e.g. Let agents refund up to $200 on their own if the order is under 14 days old, but no more than $1,000 a day"></textarea>
+        <button type="button" class="btn dark" id="aiDraft">Draft rule</button>
+      </div>
+      <div class="ai-note hidden" id="aiNote"></div>
+    </div>
+    <div class="err hidden" id="ruleErr"></div>
+    <label class="fld">Name <input id="rName" maxlength="80" placeholder="e.g. Small refunds for regular customers" required></label>
+    <div class="fld">Then
+      <div class="outcomes" id="rAction">
+        <button type="button" data-action="auto_approve" class="o-auto"><b>Auto-approve</b><span>run instantly, no human</span></button>
+        <button type="button" data-action="always_ask" class="o-ask"><b>Always ask</b><span>pause for a human</span></button>
+        <button type="button" data-action="never_allow" class="o-never"><b>Never allow</b><span>block instantly</span></button>
+      </div>
+    </div>
+    <div class="row2">
+      <label class="fld">When an agent wants to <input id="rType" list="dlTypes" placeholder="any action"></label>
+      <label class="fld">Only for agent <input id="rAgent" list="dlAgents" placeholder="any agent"></label>
+    </div>
+    <div class="fld">Conditions <span class="opt">all must match</span>
+      <div id="rConds"></div>
+      <button type="button" class="btn small" id="rAddCond">+ Add condition</button>
+    </div>
+    <label class="fld" id="rCapWrap">Daily budget <span class="opt">optional · total amount this rule may auto-approve per day</span>
+      <span class="money"><i>$</i><input id="rCap" type="number" min="1" step="any" placeholder="no limit"></span></label>
+    <div class="preview" id="rPreview"></div>
+    <div class="actions"><button class="btn primary" type="submit" id="rSave">Save mandate</button><button class="btn ghost" type="button" data-close-rule>Cancel</button></div>
+  </form>
+</div>
+<datalist id="dlTypes"></datalist><datalist id="dlAgents"></datalist>
+<datalist id="dlFields"><option value="amount"><option value="order_age_days"><option value="recipients"><option value="file_path"><option value="command"><option value="email"><option value="user_id"><option value="vendor"><option value="prior_refunds_60d"></datalist>
 
 <div class="gate hidden" id="gate">
   <form id="gateForm" autocomplete="off">
@@ -794,9 +888,12 @@ function feedItem(a) {
     case "pending": what = `${esc(label(a))} <span>· ${esc(a.agent)} waiting for human</span>`; break;
     case "edited": what = `${esc(label(a))} → ${esc(label(a, a.final_payload || {}))} <span>· by ${esc(a.decided_by)}</span>`; break;
     case "timed_out": what = `${esc(label(a))} <span>· nobody answered</span>`; break;
-    default: what = `${esc(label(a))} <span>· by ${esc(a.decided_by)}</span>`;
+    default: what = a.status === "denied" && a.decided_by === "rule"
+      ? `${esc(label(a))} <span>· policy: ${esc(a.rule_id || "")}</span>`
+      : `${esc(label(a))} <span>· by ${esc(a.decided_by)}</span>`;
   }
-  const tag = { auto_approved: "auto-approved", pending: "paused", timed_out: "timed out" }[a.status] || a.status;
+  const tag = a.status === "denied" && a.decided_by === "rule" ? "blocked"
+    : { auto_approved: "auto-approved", pending: "paused", timed_out: "timed out" }[a.status] || a.status;
   return { t, html: `<time>${clock(t)}</time><span><span class="tag t-${a.status}">${tag}</span></span><span class="what">${what}</span>`, paused: a.status === "pending" };
 }
 
@@ -851,20 +948,171 @@ async function loadPolicies() {
   $("#inboxProposals").innerHTML = html;
   $("#navProps").textContent = props.length;
   $("#navProps").classList.toggle("hidden", props.length === 0);
-  $("#rules").innerHTML = d.rules.map(r => {
-    const auto = r.action === "auto_approve";
-    return `
+  state.policyRules = {};
+  [...d.rules, ...(d.disabled || [])].forEach(r => { state.policyRules[r.id] = r; });
+  $("#rules").innerHTML = d.rules.map(ruleRow).join("") || `<div class="empty" style="border:0">No active mandates yet. Create one with “New mandate”.</div>`;
+  $("#disabledWrap").classList.toggle("hidden", !(d.disabled || []).length);
+  $("#disabledRules").innerHTML = (d.disabled || []).map(ruleRow).join("");
+}
+
+const OUTCOME = { auto_approve: ["auto", "auto-approve", ICON_AUTO], always_ask: ["ask", "always ask", ICON_ASK],
+                  never_allow: ["never", "never allow", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>'] };
+const ICON_EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
+const ICON_DEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
+
+function ruleRow(r) {
+  const [cls, word, icon] = OUTCOME[r.action] || OUTCOME.always_ask;
+  const on = r.active === 1 || r.active === true;
+  return `
     <div class="rule">
-      <div class="ri ${auto ? "auto" : "ask"}">${auto ? ICON_AUTO : ICON_ASK}</div>
+      <div class="ri ${cls}">${icon}</div>
       <div><div class="name">${esc(r.name)}</div><div class="cond">${esc(r.description)}</div></div>
       <div class="meta">
-        ${r.source === "learned" ? '<span class="pill learned">learned</span>' : ""}
-        <span class="pill ${auto ? "auto" : "ask"}">${auto ? "auto-approve" : "always ask"}</span>
+        ${r.source === "learned" ? '<span class="pill learned">learned</span>' : r.source === "custom" ? '<span class="pill custom">yours</span>' : ""}
+        <span class="pill ${cls}">${word}</span>
         <span class="mono">used ${r.times_used}×</span>
+        <span class="ctrl">
+          <button class="switch ${on ? "on" : ""}" data-toggle-rule="${esc(r.id)}" title="${on ? "Disable" : "Enable"}" aria-label="${on ? "Disable" : "Enable"} ${esc(r.name)}"></button>
+          <button class="icon-btn" data-edit-rule="${esc(r.id)}" title="Edit">${ICON_EDIT}</button>
+          <button class="icon-btn del" data-del-rule="${esc(r.id)}" title="Delete">${ICON_DEL}</button>
+        </span>
       </div>
     </div>`;
-  }).join("") || `<div class="empty">No active mandates yet.</div>`;
 }
+
+/* ---------- rule builder ---------- */
+const OPS = [["lt", "<  under"], ["lte", "≤  at most"], ["gt", ">  over"], ["gte", "≥  at least"], ["eq", "=  is"], ["neq", "≠  is not"],
+             ["contains", "contains"], ["not_contains", "doesn't contain"], ["matches", "matches (glob)"], ["is_read_only", "is read-only"]];
+const COMMON_TYPES = ["issue_refund", "email_customer", "delete_account", "run_command", "write_file"];
+const builder = { id: null, action: "auto_approve" };
+
+function condRow(c = {}) {
+  const div = document.createElement("div");
+  div.className = "crow";
+  div.innerHTML = `
+    <input class="cf" list="dlFields" placeholder="field, e.g. amount" value="${esc(c.field || "")}">
+    <select class="co">${OPS.map(([k, l]) => `<option value="${k}" ${c.op === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <input class="cv" placeholder="value" value="${esc(c.value ?? "")}">
+    <button type="button" class="icon-btn del" data-rm-cond title="Remove">${ICON_DEL}</button>`;
+  return div;
+}
+
+function readBuilder() {
+  const conds = [...document.querySelectorAll("#rConds .crow")].map(r => ({
+    field: r.querySelector(".cf").value.trim(), op: r.querySelector(".co").value, value: r.querySelector(".cv").value.trim(),
+  })).filter(c => c.field);
+  return { name: $("#rName").value.trim(), action: builder.action, conditions: {
+    action_type: $("#rType").value.trim() || null, agent: $("#rAgent").value.trim() || null,
+    daily_cap: builder.action === "auto_approve" && $("#rCap").value ? Number($("#rCap").value) : null, conds } };
+}
+
+function renderPreview() {
+  const d = readBuilder(), c = d.conditions;
+  document.querySelectorAll("#rAction button").forEach(b => b.classList.toggle("active", b.dataset.action === builder.action));
+  $("#rCapWrap").classList.toggle("hidden", builder.action !== "auto_approve");
+  document.querySelectorAll("#rConds .crow").forEach(r => { r.querySelector(".cv").classList.toggle("hidden", r.querySelector(".co").value === "is_read_only"); });
+  const verb = { auto_approve: ['auto', 'AUTO-APPROVE'], always_ask: ['ask', 'ASK A HUMAN about'], never_allow: ['never', 'BLOCK'] }[builder.action];
+  const opWord = Object.fromEntries(OPS.map(([k, l]) => [k, l.replace(/^[^a-z]+/, "")]));
+  const parts = c.conds.map(x => x.op === "is_read_only" ? `${x.field} is read-only` : `${x.field.replace(/_/g, " ")} ${opWord[x.op]} ${x.field === "amount" && x.value ? "$" + x.value : x.value || "…"}`);
+  $("#rPreview").innerHTML = `Mandate will <b class="${verb[0]}">${verb[1]}</b> ${esc(c.action_type ? human(c.action_type) : "any action")}`
+    + (c.agent ? ` from <b>${esc(c.agent)}</b>` : " from any agent")
+    + (parts.length ? ` when ${esc(parts.join(" and "))}` : "")
+    + (c.daily_cap ? `, up to <b>$${esc(c.daily_cap.toLocaleString())}</b> a day` : "") + ".";
+}
+
+function openBuilder(rule) {
+  builder.id = rule ? rule.id : null;
+  builder.action = rule ? rule.action : "auto_approve";
+  const s = rule ? rule.spec : { conds: [{ field: "amount", op: "lt", value: "" }] };
+  $("#ruleTitle").textContent = rule ? "Edit mandate" : "New mandate";
+  $("#rName").value = rule ? rule.name : "";
+  $("#rType").value = s.action_type || (rule ? "" : "issue_refund");
+  $("#rAgent").value = s.agent || "";
+  $("#rCap").value = s.daily_cap || "";
+  $("#rConds").innerHTML = "";
+  (s.conds || []).forEach(c => $("#rConds").appendChild(condRow(c)));
+  const types = new Set([...COMMON_TYPES, ...state.rows.map(r => r.action_type)]);
+  $("#dlTypes").innerHTML = [...types].map(t => `<option value="${esc(t)}">`).join("");
+  $("#dlAgents").innerHTML = state.agents.map(a => `<option value="${esc(a.name)}">`).join("");
+  $("#ruleErr").classList.add("hidden");
+  $("#aiBox").classList.toggle("hidden", !!rule);
+  $("#aiText").value = ""; $("#aiNote").classList.add("hidden");
+  $("#ruleModal").classList.remove("hidden");
+  renderPreview();
+  (rule ? $("#rName") : $("#aiText")).focus();
+}
+
+function fillBuilder(rule) {
+  const s = rule.spec || {};
+  builder.action = rule.action;
+  $("#rName").value = rule.name || "";
+  $("#rType").value = s.action_type || "";
+  $("#rAgent").value = s.agent || "";
+  $("#rCap").value = s.daily_cap || "";
+  $("#rConds").innerHTML = "";
+  (s.conds || []).forEach(c => $("#rConds").appendChild(condRow(c)));
+  renderPreview();
+}
+
+function aiNote(text, kind) {
+  const n = $("#aiNote");
+  n.className = "ai-note" + (kind ? " " + kind : "");
+  n.textContent = text;
+}
+
+$("#aiDraft").addEventListener("click", async () => {
+  const text = $("#aiText").value.trim();
+  if (!text) return $("#aiText").focus();
+  const btn = $("#aiDraft"); btn.disabled = true; btn.textContent = "Drafting…";
+  try {
+    const d = await api("/v1/policies/draft", { method: "POST", body: JSON.stringify({ text }) });
+    fillBuilder(d.rule);
+    aiNote(d.unsupported ? `Drafted, but check this: ${d.unsupported}` : "Drafted. Review the rule below, then Save mandate to grant it. Nothing is active until you do.",
+           d.unsupported ? "warn" : "");
+  } catch (err) {
+    if (err.message !== "auth") aiNote(err.message, "bad");
+  } finally { btn.disabled = false; btn.textContent = "Draft rule"; }
+});
+$("#aiText").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#aiDraft").click(); } });
+const closeBuilder = () => $("#ruleModal").classList.add("hidden");
+
+$("#newRule").addEventListener("click", () => openBuilder(null));
+$("#rAddCond").addEventListener("click", () => { $("#rConds").appendChild(condRow()); renderPreview(); });
+$("#rAction").addEventListener("click", e => { const b = e.target.closest("[data-action]"); if (b) { builder.action = b.dataset.action; renderPreview(); } });
+$("#ruleForm").addEventListener("input", renderPreview);
+$("#ruleForm").addEventListener("change", renderPreview);
+$("#ruleModal").addEventListener("click", e => {
+  if (e.target.id === "ruleModal" || e.target.closest("[data-close-rule]")) return closeBuilder();
+  const rm = e.target.closest("[data-rm-cond]");
+  if (rm) { rm.closest(".crow").remove(); renderPreview(); }
+});
+$("#ruleForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#rSave").disabled = true;
+  try {
+    await api(builder.id ? `/v1/policies/${builder.id}` : "/v1/policies",
+              { method: builder.id ? "PUT" : "POST", body: JSON.stringify(readBuilder()) });
+    closeBuilder();
+    toast(builder.id ? "Mandate updated" : "Mandate granted");
+    await loadPolicies();
+  } catch (err) {
+    if (err.message !== "auth") { $("#ruleErr").textContent = err.message; $("#ruleErr").classList.remove("hidden"); }
+  } finally { $("#rSave").disabled = false; }
+});
+document.addEventListener("click", async e => {
+  const t = e.target.closest("[data-toggle-rule],[data-edit-rule],[data-del-rule]");
+  if (!t) return;
+  const id = t.dataset.toggleRule || t.dataset.editRule || t.dataset.delRule, r = state.policyRules[id];
+  if (t.dataset.editRule) return openBuilder(r);
+  try {
+    if (t.dataset.toggleRule) await api(`/v1/policies/${id}/${t.classList.contains("on") ? "disable" : "enable"}`, { method: "POST" });
+    if (t.dataset.delRule) {
+      if (!confirm(`Delete the mandate “${r ? r.name : id}”? This can't be undone.`)) return;
+      await api(`/v1/policies/${id}`, { method: "DELETE" });
+    }
+    await loadPolicies();
+  } catch (err) { if (err.message !== "auth") toast(err.message); }
+});
 
 document.addEventListener("click", async e => {
   const id = e.target.dataset.grant || e.target.dataset.keep;
@@ -1126,7 +1374,7 @@ $("#wizard").addEventListener("click", e => {
   if (w === "copykey") copyText(state.agentKey, e.target);
   if (w === "copycode") copyText(wiz.code, e.target);
 });
-document.addEventListener("keydown", e => { if (e.key === "Escape" && wiz.open) closeWizard(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { if (wiz.open) closeWizard(); closeBuilder(); } });
 
 /* ---------- history ---------- */
 const decisionLabel = { auto_approved: "auto-approved", timed_out: "timed out" };

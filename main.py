@@ -44,6 +44,11 @@ async def notify_callback(approval, note=None):
         pass
 
 
+async def _late_callback(approval, note):
+    await asyncio.sleep(3)
+    await notify_callback(approval, note)
+
+
 async def expiry_loop():
     while True:
         await asyncio.sleep(5)
@@ -218,8 +223,13 @@ async def create_approval(body: ApprovalIn):
                                 body.context, body.reasoning, body.callback_url,
                                 body.timeout_seconds, body.on_timeout, None, body.source)
     publish("approval", a)
+    if a["status"] == "denied" and a.get("callback_url"):
+        # blocked by a never-allow rule: tell callback agents too (n8n's Wait node needs a moment to start listening)
+        task = asyncio.create_task(_late_callback(a, "blocked by policy"))
+        background.add(task)
+        task.add_done_callback(background.discard)
     return {"id": a["id"], "status": a["status"], "risk_score": a["risk_score"],
-            "risk_reasons": a["risk_reasons"], "rule_id": a["rule_id"]}
+            "risk_reasons": a["risk_reasons"], "rule_id": a["rule_id"], "decided_by": a["decided_by"]}
 
 
 @app.get("/v1/approvals/{approval_id}", dependencies=[Depends(require_key)])
@@ -274,6 +284,77 @@ async def after_decision(a, note):
 @app.get("/v1/policies", dependencies=[Depends(require_key)])
 async def get_policies():
     return core.policies()
+
+
+class RuleIn(BaseModel):
+    name: str
+    action: str
+    conditions: dict = {}
+    active: Optional[bool] = None
+
+
+@app.post("/v1/policies", dependencies=[Depends(require_key)])
+async def create_policy(body: RuleIn):
+    try:
+        rule = core.save_rule(None, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    publish("policy", rule)
+    return rule
+
+
+class DraftIn(BaseModel):
+    text: str
+
+
+@app.post("/v1/policies/draft", dependencies=[Depends(require_key)])
+async def draft_policy(body: DraftIn):
+    """AI translates plain English into a rule. Nothing is saved; a human reviews and grants it."""
+    try:
+        return await run_in_threadpool(core.draft_rule, body.text)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.put("/v1/policies/{rule_id}", dependencies=[Depends(require_key)])
+async def update_policy(rule_id: str, body: RuleIn):
+    try:
+        rule = core.save_rule(rule_id, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "no editable mandate with that id")
+    publish("policy", rule)
+    return rule
+
+
+@app.post("/v1/policies/{rule_id}/enable", dependencies=[Depends(require_key)])
+async def enable_policy(rule_id: str):
+    return _toggle(rule_id, True)
+
+
+@app.post("/v1/policies/{rule_id}/disable", dependencies=[Depends(require_key)])
+async def disable_policy(rule_id: str):
+    return _toggle(rule_id, False)
+
+
+def _toggle(rule_id, active):
+    try:
+        rule = core.set_rule_active(rule_id, active)
+    except KeyError:
+        raise HTTPException(404, "no editable mandate with that id")
+    publish("policy", rule)
+    return rule
+
+
+@app.delete("/v1/policies/{rule_id}", dependencies=[Depends(require_key)])
+async def delete_policy(rule_id: str):
+    try:
+        core.delete_rule(rule_id)
+    except KeyError:
+        raise HTTPException(404, "no editable mandate with that id")
+    publish("policy", {"id": rule_id, "source": "deleted"})
+    return {"id": rule_id, "status": "deleted"}
 
 
 @app.post("/v1/policies/{rule_id}/dismiss", dependencies=[Depends(require_key)])

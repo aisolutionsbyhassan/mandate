@@ -116,6 +116,9 @@ def main():
                 updated[k] = v
         changes = ", ".join(f"{k}={v!r}" for k, v in final.items() if k in inp and inp.get(k) != v and k not in truncated)
         respond("allow", f"{who} edited this in Mandate before approving ({changes or 'no changes'}).", updated)
+    if status == "denied" and who == "rule":
+        respond("deny", f"A Mandate policy ({a.get('rule_id')}) never allows this {action_type.replace('_', ' ')}. "
+                        "Do not retry it or work around it; tell the user it is blocked by policy.")
     if status == "denied":
         respond("deny", f"A human ({who}) denied this {action_type.replace('_', ' ')} in Mandate. "
                         "Do not retry it or work around it; tell the user and ask how they want to proceed.")

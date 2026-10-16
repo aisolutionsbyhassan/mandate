@@ -156,6 +156,9 @@
   .proposal { background: linear-gradient(180deg, rgba(139,157,255,.07), transparent 70%), var(--panel); border: 1px solid rgba(139,157,255,.45); border-radius: var(--radius); padding: 24px 26px; margin-bottom: 16px; }
   .proposal .kicker { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 8px; }
   .proposal p { font-size: 20px; margin: 0 0 6px; font-weight: 600; }
+  #inboxProposals .proposal { margin-bottom: 20px; animation: enter .35s ease-out; }
+  nav .count.accent { background: var(--accent); color: var(--accent-ink); }
+  .t-rule { color: var(--accent); }
   .proposal .cond { color: var(--muted); margin-bottom: 18px; font-size: 14px; }
   .rules { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
   .rule { display: grid; grid-template-columns: 1fr auto; gap: 16px; padding: 18px 22px; background: var(--panel); align-items: center; }
@@ -214,7 +217,7 @@
     <div class="brand">MANDATE</div>
     <nav>
       <button data-tab="inbox" class="active">Inbox <span class="count hidden" id="navCount">0</span></button>
-      <button data-tab="policies">Policies</button>
+      <button data-tab="policies">Policies <span class="count accent hidden" id="navProps">0</span></button>
       <button data-tab="history">History</button>
     </nav>
     <div class="spacer"></div>
@@ -232,6 +235,7 @@
     <div class="inbox">
       <div>
         <div class="col-head"><h2>Waiting for a human</h2></div>
+        <div id="inboxProposals"></div>
         <div id="cards"></div>
         <div class="empty" id="emptyInbox">
           <strong>Nothing is waiting on you</strong>
@@ -292,7 +296,7 @@ const ls = {
   get(k, d) { try { return localStorage.getItem(k) || d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
-const state = { key: ls.get("mandate_key", ""), name: ls.get("mandate_name", "hamza"), dismissed: new Set() };
+const state = { key: ls.get("mandate_key", ""), name: ls.get("mandate_name", "hamza") };
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = n => "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -484,6 +488,13 @@ function addFeed(a, isNew = true) {
   while (feed.children.length > 60) feed.lastChild.remove();
 }
 
+function addRuleFeed(tag, what) {
+  const li = document.createElement("li");
+  li.className = "new";
+  li.innerHTML = `<time class="mono">${clock(new Date().toISOString())}</time><span class="tag t-rule">${tag}</span><span class="what">${what}</span>`;
+  $("#feed").prepend(li);
+}
+
 /* ---------- policies + meter ---------- */
 function setMeter(pct) {
   $("#meterSm").style.width = pct + "%";
@@ -495,18 +506,22 @@ function setMeter(pct) {
 async function loadPolicies() {
   const d = await api("/v1/policies");
   setMeter(d.autonomy_score);
-  const props = d.proposals.filter(p => !state.dismissed.has(p.id));
+  const props = d.proposals;
   $("#proposalsWrap").classList.toggle("hidden", props.length === 0);
-  $("#proposals").innerHTML = props.map(p => `
+  const html = props.map(p => `
     <div class="proposal" data-id="${esc(p.id)}">
-      <div class="kicker">Proposed mandate</div>
-      <p>${esc(p.name)}</p>
-      <div class="cond">Covers: ${esc(p.description)}</div>
+      <div class="kicker">Mandate noticed a pattern</div>
+      <p>${esc(p.pitch || p.name)}</p>
+      <div class="cond">New rule: ${esc(p.name)} <span class="mono">· ${esc(p.id)}</span></div>
       <div class="actions">
         <button class="btn primary" data-grant="${esc(p.id)}">Grant this mandate</button>
         <button class="btn ghost" data-keep="${esc(p.id)}">Keep asking</button>
       </div>
     </div>`).join("");
+  $("#proposals").innerHTML = html;
+  $("#inboxProposals").innerHTML = html;
+  $("#navProps").textContent = props.length;
+  $("#navProps").classList.toggle("hidden", props.length === 0);
   $("#rules").innerHTML = d.rules.map(r => `
     <div class="rule">
       <div><div class="name">${esc(r.name)}</div><div class="cond">${esc(r.description)}</div></div>
@@ -518,14 +533,13 @@ async function loadPolicies() {
     </div>`).join("") || `<div class="empty">No active mandates yet.</div>`;
 }
 
-$("#proposals").addEventListener("click", async e => {
-  const grant = e.target.dataset.grant, keep = e.target.dataset.keep;
-  if (keep) { state.dismissed.add(keep); loadPolicies(); }
-  if (grant) {
-    e.target.disabled = true;
-    try { await api(`/v1/policies/${grant}/grant`, { method: "POST" }); await loadPolicies(); }
-    catch (err) { e.target.disabled = false; if (err.message !== "auth") toast(err.message); }
-  }
+document.addEventListener("click", async e => {
+  const id = e.target.dataset.grant || e.target.dataset.keep;
+  if (!id) return;
+  const path = e.target.dataset.grant ? "grant" : "dismiss";
+  e.target.disabled = true;
+  try { await api(`/v1/policies/${id}/${path}`, { method: "POST" }); await loadPolicies(); }
+  catch (err) { e.target.disabled = false; if (err.message !== "auth") toast(err.message); }
 });
 
 /* ---------- history ---------- */
@@ -593,7 +607,12 @@ function connect() {
     addFeed(a);
     scheduleRefresh();
   });
-  es.addEventListener("policy", scheduleRefresh);
+  es.addEventListener("policy", e => {
+    const r = JSON.parse(e.data);
+    if (r.source === "proposed") addRuleFeed("suggested", `new mandate <span>· ${esc(r.id)} · waiting for your OK</span>`);
+    if (r.source === "learned") addRuleFeed("granted", `${esc(r.name)} <span>· agent autonomy goes up</span>`);
+    scheduleRefresh();
+  });
 }
 
 /* ---------- key gate ---------- */

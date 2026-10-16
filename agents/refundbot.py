@@ -1,6 +1,7 @@
 """RefundBot: a demo support agent that must ask Mandate before risky actions.
 
     python -m agents.refundbot --scenario small   # $20 refund, auto-approved, never pauses
+    python -m agents.refundbot --scenario medium  # $260 refund, pauses; approve 3x and Mandate proposes a rule
     python -m agents.refundbot --scenario large   # $9,400 refund, pauses for a human
 
 Reads MANDATE_URL, MANDATE_API_KEY, GROQ_API_KEY from the environment.
@@ -29,6 +30,8 @@ FAKE_ORDERS = {
 
 SCENARIOS = {
     "small": ("1201", "Hi, my phone case from order #1201 arrived cracked. Can I get my $20 back?"),
+    "medium": ("3302", "Hi, it's Ayesha. The smartwatch from order #3302 stopped charging after two weeks. "
+                       "Can I get my $260 back?"),
     "large": ("4471", "This is Ali Raza. Order #4471 was a disaster. I want a full refund of $9,400 "
                       "right now or I'm going to the press."),
 }
@@ -136,8 +139,9 @@ def run_scripted(order_id, message):
     """Same flow without the LLM, so the demo still runs if Groq is down."""
     o = FAKE_ORDERS[order_id]
     args = {"order_id": order_id, "amount": o["total"],
-            "reason": "Customer reports the order arrived damaged." if o["total"] < 50
-            else "Customer demands a full refund and threatens to escalate."}
+            "reason": {"1201": "Customer reports the order arrived damaged.",
+                       "3302": "Smartwatch stopped charging within policy window."}.get(
+                order_id, "Customer demands a full refund and threatens to escalate.")}
     print(f"RefundBot calls issue_refund({json.dumps(args)})")
     result = run_tool("issue_refund", args)
     if result.startswith(("DENIED", "No human")):

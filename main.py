@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 import core
 
 subscribers = set()
+background = set()
 
 
 def publish(event_type, data):
@@ -136,13 +137,36 @@ async def decide(approval_id: str, body: DecideIn):
     except ValueError as e:
         raise HTTPException(400, str(e))
     publish("decision", a)
-    await notify_callback(a, body.note)
+    task = asyncio.create_task(after_decision(a, body.note))
+    background.add(task)
+    task.add_done_callback(background.discard)
     return a
+
+
+async def after_decision(a, note):
+    """Off the request path: tell the agent, then let the learning engine look for a pattern."""
+    await notify_callback(a, note)
+    try:
+        proposal = await run_in_threadpool(core.learn, a)
+        if proposal:
+            publish("policy", proposal)
+    except Exception:
+        pass
 
 
 @app.get("/v1/policies", dependencies=[Depends(require_key)])
 async def get_policies():
     return core.policies()
+
+
+@app.post("/v1/policies/{rule_id}/dismiss", dependencies=[Depends(require_key)])
+async def dismiss_policy(rule_id: str):
+    try:
+        core.dismiss_rule(rule_id)
+    except KeyError:
+        raise HTTPException(404, "no pending proposal with that id")
+    publish("policy", {"id": rule_id, "source": "dismissed"})
+    return {"id": rule_id, "status": "dismissed"}
 
 
 @app.post("/v1/policies/{rule_id}/grant", dependencies=[Depends(require_key)])

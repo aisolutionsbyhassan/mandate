@@ -93,6 +93,7 @@ def _present(row):
 def _present_rule(row):
     out = dict(row)
     out["conditions"] = json.loads(out.pop("conditions_json") or "{}")
+    out["pitch"] = out["conditions"].pop("pitch", None)
     out["description"] = describe_conditions(out["conditions"])
     return out
 
@@ -191,6 +192,8 @@ def describe_conditions(cond):
         parts.append(f"amount under ${cond['amount_lt']:,.0f}")
     if "order_age_days_lt" in cond:
         parts.append(f"order under {cond['order_age_days_lt']:.0f} days old")
+    if "recipients_lt" in cond:
+        parts.append(f"under {cond['recipients_lt']:.0f} recipients")
     return ", ".join(parts) or "any action"
 
 
@@ -204,6 +207,10 @@ def rule_matches(cond, action_type, payload, context):
     if "order_age_days_lt" in cond:
         age = _num((context or {}).get("order_age_days"))
         if age is None or not age < cond["order_age_days_lt"]:
+            return False
+    if "recipients_lt" in cond:
+        n = _num((context or {}).get("recipients"))
+        if n is None or not n < cond["recipients_lt"]:
             return False
     return True
 
@@ -244,6 +251,128 @@ def grant_rule(rule_id):
     if not n:
         raise KeyError(rule_id)
     return _present_rule(_query("SELECT * FROM rules WHERE id=?", (rule_id,))[0])
+
+
+# ---------------------------------------------------------------- learning engine
+
+NOUNS = {"issue_refund": ("refunds", "refund"), "email_customer": ("customer emails", "email")}
+PITCH_PROMPT = (
+    "You are Mandate, an approval layer for AI agents. A human approved several similar agent actions. "
+    "Write ONE friendly sentence (max 30 words) addressed to them that says how many they approved, "
+    "states the exact limits given, and asks if you should handle these yourself from now on. "
+    "Mention only the limits provided, keep their exact numbers, and say 'under'/'fewer than', never 'up to'. "
+    "Style example: 'You approved 3 similar refunds — all under $50, all within 30 days. "
+    "Should I handle these myself from now on?' "
+    'End with a question mark. Return only JSON: {"pitch": "..."}'
+)
+
+
+def _round_up(x, step):
+    """Smallest multiple of step strictly above x: 45 -> 50, 50 -> 60, 260 -> 300."""
+    return (int(x // step) + 1) * step
+
+
+def _pitch(action_type, n, cond):
+    plural = NOUNS.get(action_type, (action_type.replace("_", " ") + "s",))[0]
+    limits = []
+    if "amount_lt" in cond:
+        limits.append(f"all under ${cond['amount_lt']:,.0f}")
+    if "order_age_days_lt" in cond:
+        limits.append(f"all within {cond['order_age_days_lt']:.0f} days")
+    if "recipients_lt" in cond:
+        limits.append(f"all to fewer than {cond['recipients_lt']:.0f} people")
+    template = (f"You approved {n} similar {plural}" + (" — " + ", ".join(limits) if limits else "")
+                + ". Should I handle these myself from now on?")
+    key = os.environ.get("GROQ_API_KEY")
+    if not key:
+        return template
+    try:
+        from groq import Groq
+
+        client = Groq(api_key=key, timeout=3, max_retries=0)
+        resp = client.chat.completions.create(
+            model=GROQ_MODEL, temperature=0.3, max_tokens=300,
+            response_format={"type": "json_object"}, extra_body={"reasoning_effort": "low"},
+            messages=[{"role": "system", "content": PITCH_PROMPT},
+                      {"role": "user", "content": json.dumps({
+                          "approved_count": n, "kind": plural, "limits": {k: v for k, v in {
+                              "amount_under_usd": cond.get("amount_lt"),
+                              "order_age_under_days": cond.get("order_age_days_lt"),
+                              "recipients_fewer_than": cond.get("recipients_lt")}.items() if v is not None}})}])
+        pitch = str(json.loads(resp.choices[0].message.content)["pitch"]).strip()
+        return pitch if pitch.endswith("?") and 20 < len(pitch) < 260 else template
+    except Exception:
+        return template
+
+
+def learn(approval):
+    """After a human approval: if the last 3 approvals of this action type share an envelope
+    no active rule covers, propose a rule (inactive until a human grants it)."""
+    if approval.get("status") != "approved":
+        return None
+    at = approval["action_type"]
+    if at == "delete_account":  # hard floor: never proposed
+        return None
+    rows = [_present(r) for r in _query(
+        "SELECT * FROM approvals WHERE action_type=? AND status='approved' "
+        "ORDER BY decided_at DESC, rowid DESC LIMIT 3", (at,))]
+    if len(rows) < 3:
+        return None
+    if _query("SELECT 1 FROM rules WHERE source='proposed' AND active=0 "
+              "AND json_extract(conditions_json, '$.action_type')=?", (at,)):
+        return None  # one open proposal per action type
+    if _query("SELECT 1 FROM rules WHERE source='dismissed' AND created_at>=? "
+              "AND json_extract(conditions_json, '$.action_type')=?",
+              (min(r["decided_at"] for r in rows), at)):
+        return None  # human said "keep asking" after some of these approvals
+
+    cond = {"action_type": at}
+    amounts = [_num(r["payload"].get("amount")) for r in rows]
+    if all(a is not None for a in amounts):
+        mx = max(amounts)
+        if mx >= 500:  # above the hard floor a rule could never apply
+            return None
+        cond["amount_lt"] = min(_round_up(mx, 10 if mx < 100 else 50), 500)
+    ages = [_num(r["context"].get("order_age_days")) for r in rows]
+    if all(a is not None for a in ages):
+        cond["order_age_days_lt"] = _round_up(max(ages), 5)
+    recips = [_num(r["context"].get("recipients")) for r in rows]
+    if all(n is not None for n in recips):
+        cond["recipients_lt"] = _round_up(max(recips), 10)
+
+    rules = _query("SELECT * FROM rules WHERE active=1")
+    for r in rules:
+        r["conditions"] = json.loads(r["conditions_json"])
+    for row in rows:
+        if any(r["action"] == "always_ask" and rule_matches(r["conditions"], at, row["payload"], row["context"])
+               for r in rules):
+            return None
+    if all(any(r["action"] == "auto_approve" and rule_matches(r["conditions"], at, row["payload"], row["context"])
+               for r in rules) for row in rows):
+        return None  # already covered
+
+    short = NOUNS.get(at, (None, at.replace("_", "-")))[1]
+    rule_id = f"{short}-under-{cond['amount_lt']:.0f}" if "amount_lt" in cond else f"{short}-learned"
+    if "order_age_days_lt" in cond:
+        rule_id += f"-{cond['order_age_days_lt']:.0f}d"
+    if _query("SELECT 1 FROM rules WHERE id=?", (rule_id,)):
+        rule_id += "-" + uuid.uuid4().hex[:4]
+    plural = NOUNS.get(at, (at.replace("_", " ") + "s",))[0]
+    name = f"Auto-approve {plural} " + " ".join(
+        ([f"under ${cond['amount_lt']:,.0f}"] if "amount_lt" in cond else [])
+        + ([f"within {cond['order_age_days_lt']:.0f} days"] if "order_age_days_lt" in cond else [])
+        + ([f"to fewer than {cond['recipients_lt']:.0f} recipients"] if "recipients_lt" in cond else []))
+    stored = {**cond, "pitch": _pitch(at, len(rows), cond)}
+    _exec("INSERT INTO rules VALUES (?,?,?,?,?,?,?,?)",
+          (rule_id, name.strip(), json.dumps(stored), "auto_approve", "proposed", 0, 0, _iso(_now())))
+    return _present_rule(_query("SELECT * FROM rules WHERE id=?", (rule_id,))[0])
+
+
+def dismiss_rule(rule_id):
+    """'Keep asking': park the proposal. A new one needs 3 fresh approvals after this moment."""
+    if not _exec("UPDATE rules SET source='dismissed', created_at=? WHERE id=? AND source='proposed' AND active=0",
+                 (_iso(_now()), rule_id)):
+        raise KeyError(rule_id)
 
 
 # ---------------------------------------------------------------- approvals

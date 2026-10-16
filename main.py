@@ -8,7 +8,7 @@ from typing import Optional
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
@@ -89,7 +89,8 @@ class DecideIn(BaseModel):
     decided_by: str = "human"
     note: Optional[str] = None
 
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates"))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
 @app.get("/health")
@@ -102,6 +103,13 @@ def index(request: Request):
     return templates.TemplateResponse(request, "app.html", {})
 
 
+@app.get("/integrations/claude_code_hook.py", response_class=PlainTextResponse)
+def claude_code_hook():
+    """The hook script, so the Connect wizard can offer a one-line download. Contains no secrets."""
+    with open(os.path.join(BASE_DIR, "integrations", "claude_code_hook.py"), encoding="utf-8") as f:
+        return f.read()
+
+
 @app.post("/v1/approvals", dependencies=[Depends(require_key)])
 async def create_approval(body: ApprovalIn):
     # run in a thread: the Groq explanation can take up to 3s and must not block SSE
@@ -110,7 +118,7 @@ async def create_approval(body: ApprovalIn):
                                 body.timeout_seconds, body.on_timeout, None, body.source)
     publish("approval", a)
     return {"id": a["id"], "status": a["status"], "risk_score": a["risk_score"],
-            "risk_reasons": a["risk_reasons"]}
+            "risk_reasons": a["risk_reasons"], "rule_id": a["rule_id"]}
 
 
 @app.get("/v1/approvals/{approval_id}", dependencies=[Depends(require_key)])

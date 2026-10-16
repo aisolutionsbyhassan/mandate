@@ -94,6 +94,7 @@
   .fields dd.big { font-size: 22px; }
   .fields div.wide { flex-basis: 100%; }
   .fields div.wide dd { font-weight: 450; font-size: 14px; color: #c9ced6; }
+  .fields dd.code { white-space: pre-wrap; font-size: 13.5px; color: var(--text); max-height: 260px; overflow-y: auto; }
   .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; margin-bottom: 6px; }
   .why ul { margin: 0 0 18px; padding-left: 18px; }
   .why li { margin: 3px 0; }
@@ -374,6 +375,8 @@ function label(a, p = a.payload || {}) {
   if (a.action_type === "issue_refund") return `refund ${hasAmount(p) ? money(p.amount) : ""}`;
   if (a.action_type === "email_customer") return `email ${p.email || ""}`;
   if (a.action_type === "delete_account") return `delete account ${p.user_id || ""}`;
+  if (a.action_type === "run_command") { const c = String(p.command || ""); return `run ${c.length > 48 ? c.slice(0, 48) + "…" : c}`; }
+  if (a.action_type === "write_file") return `write ${String(p.file_path || "").split(/[\\/]/).pop()}`;
   return human(a.action_type);
 }
 
@@ -405,8 +408,9 @@ function fieldsHtml(p) {
   return Object.entries(p || {}).map(([k, v]) => {
     const isAmt = k === "amount" && !isNaN(Number(v));
     const val = isAmt ? money(v) : typeof v === "object" ? JSON.stringify(v) : v;
-    const long = String(val).length > 32;
-    return `<div class="${long ? "wide" : ""}"><dt>${esc(human(k))}</dt><dd class="${isAmt ? "big" : ""}">${esc(val)}</dd></div>`;
+    const code = ["command", "content", "old_string", "new_string", "file_path"].includes(k);
+    const long = code || String(val).length > 32;
+    return `<div class="${long ? "wide" : ""}"><dt>${esc(human(k))}</dt><dd class="${isAmt ? "big" : ""}${code ? " code mono" : ""}">${esc(val)}</dd></div>`;
   }).join("");
 }
 
@@ -420,6 +424,8 @@ function ctxHtml(c) {
   }
   if (c.prior_refunds_60d) chips.push([`${c.prior_refunds_60d} refunds in 60 days`, c.prior_refunds_60d >= 2]);
   if (c.recipients) chips.push([`${c.recipients} recipients`, c.recipients > 100]);
+  if (c.cwd) chips.push([`in ${c.cwd}`]);
+  if (c.tool) chips.push([`tool: ${c.tool}`]);
   if (!chips.length) return "";
   return `<div class="ctx">${chips.map(([t, w]) => `<span class="chip ${w ? "warn" : ""}">${esc(t)}</span>`).join("")}</div>`;
 }
@@ -685,21 +691,25 @@ ${body(',\n  "callback_url": "{{ $execution.resumeUrl }}"').replace(/^/gm, "    
 Wait node
   Resume: On Webhook Call
   The decision arrives as { status, final_payload, decided_by }.`],
-    claude_code: ["A PreToolUse hook sends Bash / Write / Edit calls to Mandate. The hook script ships in Phase 7; this is the settings.json it will use.",
-`// .claude/settings.json
+    claude_code: ["A PreToolUse hook sends every Bash / Write / Edit call to Mandate first. Read-only commands are auto-approved; rm -rf, force pushes and secrets need you. Restart Claude Code after adding it.",
+`# 1. in your project, download the hook (standard library only, no installs)
+mkdir -p .claude/hooks
+curl -o .claude/hooks/mandate_hook.py ${url}/integrations/claude_code_hook.py
+
+# 2. add this to .claude/settings.json
 {
+  "env": {
+    "MANDATE_URL": "${url}",
+    "MANDATE_API_KEY": "${key}"
+  },
   "hooks": {
     "PreToolUse": [{
-      "matcher": "Bash|Write|Edit",
-      "hooks": [{ "type": "command",
-                  "command": "python integrations/claude_code_hook.py" }]
+      "matcher": "Bash|Write|Edit|MultiEdit",
+      "hooks": [{ "type": "command", "timeout": 600,
+                  "command": "python \\"$CLAUDE_PROJECT_DIR/.claude/hooks/mandate_hook.py\\"" }]
     }]
   }
-}
-
-# environment for the hook
-export MANDATE_URL=${url}
-export MANDATE_API_KEY=${key}`],
+}`],
     make: ["Scenario 1: HTTP > Make a request, pointing callback_url at a Custom webhook in a second scenario that continues the work.",
 `HTTP module: Make a request
   URL:      ${url}/v1/approvals

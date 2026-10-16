@@ -6,6 +6,7 @@ auto-approve, everything else escalates to a human. The LLM only explains.
 """
 import json
 import os
+import re
 import sqlite3
 import uuid
 from contextlib import closing
@@ -37,7 +38,8 @@ CREATE TABLE IF NOT EXISTS rules (
 """
 
 SOURCES = ("python", "langgraph", "n8n", "claude_code", "make", "zapier", "http")
-IRREVERSIBILITY = {"delete_account": 40, "issue_refund": 30, "email_customer": 10}
+IRREVERSIBILITY = {"delete_account": 40, "issue_refund": 30, "email_customer": 10,
+                   "run_command": 10, "write_file": 5}
 DECISIONS = {"approved": "approved", "approve": "approved", "denied": "denied",
              "deny": "denied", "edited": "edited", "edit": "edited"}
 
@@ -99,6 +101,69 @@ def _present_rule(row):
     return out
 
 
+# ---------------------------------------------------------------- coding-agent risk (Phase 7)
+
+SECRET_FILE = re.compile(r"(^|[\\/])(\.env(\.(?!example\b)[\w.-]+)?|id_rsa|id_ed25519|[^\\/\s]*\.pem|[^\\/\s]*\.key"
+                         r"|secrets?\.\w+|credentials[\w.]*)$", re.I)
+COMMAND_FLOORS = [
+    (r"\brm\b[^;&|]*\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b", "recursive delete (rm -r)"),
+    (r"\bgit\s+push\b[^;&|]*\s(--force(-with-lease)?|-f)\b", "force push rewrites shared history"),
+    (r"\b(drop\s+(table|database|schema)|truncate\s+table)\b", "destroys database data"),
+    (r"\bmkfs\b|\bdd\b[^;&|]*\bof=/dev/", "wipes a disk"),
+    (r"\b(curl|wget)\b[^;&]*\|\s*(sudo\s+)?(ba|z)?sh\b", "pipes a remote script into a shell"),
+    (r">\s*\S*\.env\b(?!\.example)", "overwrites a secrets file"),
+]
+COMMAND_SIGNALS = [
+    (r"\bgit\s+reset\s+--hard\b|\bgit\s+clean\s+-\w*f", 25, "discards uncommitted work"),
+    (r"\b(kubectl\s+(apply|delete)|terraform\s+(apply|destroy)|fly\s+deploy|docker\s+push|npm\s+publish"
+     r"|helm\s+(install|upgrade)|vercel\b[^;&|]*--prod|(gcloud|aws)\b[^;&|]*\bdeploy)\b", 30, "deploys or publishes to production"),
+    (r"\bgit\s+push\b", 20, "publishes commits to a shared remote"),
+    (r"\bsudo\b", 20, "runs with root privileges"),
+    (r"\b(rm|rmdir|del)\b", 15, "deletes files"),
+    (r"\b(chmod|chown)\b", 10, "changes file permissions"),
+]
+SAFE_COMMANDS = {"ls", "dir", "pwd", "cat", "head", "tail", "wc", "echo", "grep", "rg", "find", "which", "where",
+                 "whoami", "date", "tree", "file", "stat", "du", "df", "sort", "uniq", "cut", "diff", "ps", "type",
+                 "test", "["}
+SAFE_GIT = {"status", "log", "diff", "show", "rev-parse", "ls-files", "blame", "describe"}
+
+
+def is_readonly_command(cmd):
+    """True only if every piece of the command just reads (ls, cat, git status...)."""
+    cmd = re.sub(r"\d*>\s*/dev/null|\d*>&\d", " ", cmd or "")  # discarding output writes nothing
+    if not cmd.strip() or re.search(r"[>`]|\$\(", cmd):
+        return False
+    for seg in re.split(r"&&|\|\||;|\|", cmd):
+        toks = seg.split()
+        if not toks:
+            continue
+        if any(SECRET_FILE.search(t.strip("'\"")) for t in toks):
+            return False
+        if toks[0] == "git":
+            if len(toks) < 2 or toks[1] not in SAFE_GIT:
+                return False
+        elif toks[0] not in SAFE_COMMANDS or (toks[0] == "find" and {"-delete", "-exec", "-execdir", "-ok"} & set(toks)):
+            return False
+    return True
+
+
+def code_risk(action_type, payload):
+    """Extra points, signals and hard floor for coding-agent actions."""
+    pts, signals, floor = 0, [], None
+    if action_type == "run_command":
+        cmd = str(payload.get("command") or "")
+        floor = next((why for pat, why in COMMAND_FLOORS if re.search(pat, cmd, re.I)), None)
+        for pat, p, why in COMMAND_SIGNALS:
+            if re.search(pat, cmd, re.I):
+                pts += p
+                signals.append(f"Command {why} (+{p})")
+    elif action_type == "write_file":
+        path = str(payload.get("file_path") or "")
+        if SECRET_FILE.search(path):
+            floor = f"editing {os.path.basename(path)} can leak or break secrets"
+    return pts, signals, floor
+
+
 # ---------------------------------------------------------------- risk scoring
 
 def score_risk(action_type, payload, context):
@@ -132,6 +197,14 @@ def score_risk(action_type, payload, context):
     if recipients is not None and recipients > 100:
         score += 20
         signals.append(f"Blast radius: {recipients:.0f} recipients (+20)")
+
+    pts, code_signals, code_floor = code_risk(action_type, payload)
+    score += pts
+    signals.extend(code_signals)
+    if code_floor:
+        floor = True
+        score = max(score, 70)
+        signals.insert(0, f"Hard floor: {code_floor}, a human must decide")
 
     return {"score": min(100, score), "signals": signals, "floor": floor}
 
@@ -178,6 +251,10 @@ def explain(action_type, payload, context, risk):
         n = _num((context or {}).get("recipients"))
         impact = (f"An email goes to {n:.0f} people and can't be recalled." if n and n > 1
                   else "An email goes to the customer and can't be recalled.")
+    elif action_type == "run_command":
+        impact = "The command runs on the developer's machine and its effects may not be reversible."
+    elif action_type == "write_file":
+        impact = f"{(payload or {}).get('file_path', 'The file')} is overwritten; uncommitted contents may be lost."
     else:
         impact = "The action runs immediately and may not be reversible."
     return {"reasons": reasons, "impact_if_wrong": impact}
@@ -187,6 +264,8 @@ def explain(action_type, payload, context, risk):
 
 def describe_conditions(cond):
     parts = []
+    if cond.get("readonly_command"):
+        return "read-only shell commands (ls, cat, grep, git status/log/diff…)"
     if cond.get("action_type"):
         parts.append(cond["action_type"].replace("_", " "))
     if "amount_lt" in cond:
@@ -200,6 +279,9 @@ def describe_conditions(cond):
 
 def rule_matches(cond, action_type, payload, context):
     if cond.get("action_type") and cond["action_type"] != action_type:
+        return False
+    if cond.get("readonly_command") and not (
+            action_type == "run_command" and is_readonly_command((payload or {}).get("command"))):
         return False
     if "amount_lt" in cond:
         amount = _num((payload or {}).get("amount"))
@@ -312,7 +394,7 @@ def learn(approval):
     if approval.get("status") != "approved":
         return None
     at = approval["action_type"]
-    if at == "delete_account":  # hard floor: never proposed
+    if at in ("delete_account", "run_command", "write_file"):  # never learn blanket rules for these
         return None
     rows = [_present(r) for r in _query(
         "SELECT * FROM approvals WHERE action_type=? AND status='approved' "
@@ -534,6 +616,10 @@ def _seed():
     _exec("INSERT INTO rules VALUES (?,?,?,?,?,?,?,?)",
           ("ask-delete-account", "Always ask before deleting an account",
            json.dumps({"action_type": "delete_account"}), "always_ask", "seed", 0, 1, now))
+    _exec("INSERT INTO rules VALUES (?,?,?,?,?,?,?,?)",
+          ("readonly-commands", "Auto-approve read-only shell commands",
+           json.dumps({"action_type": "run_command", "readonly_command": True}),
+           "auto_approve", "seed", 0, 1, now))
 
     # (agent, action, payload, context, reasoning, status, decided_by, hours_ago, latency_s, final)
     history = [
@@ -562,6 +648,8 @@ def _seed():
          {"recipients": 1}, "Lead asked for a follow-up.", "approved", "hamza", 0.7, 11, None),
         ("claude-code", "run_command", {"command": "git push --force origin main"},
          {}, "Pushing the rebased branch.", "denied", "hamza", 0.4, 6, None),
+        ("claude-code", "run_command", {"command": "git status"},
+         {}, "Checking the working tree before committing.", "auto_approved", "rule", 0.3, 0, None),
     ]
     seed_sources = {"refundbot": "python", "n8n-support": "n8n", "make-invoicing": "make",
                     "zapier-leads": "zapier", "claude-code": "claude_code"}
@@ -577,8 +665,10 @@ def _seed():
             "impact_if_wrong": expl["impact_if_wrong"], "status": status, "decided_by": by,
             "decided_at": _iso(created + timedelta(seconds=lat)),
             "final_payload_json": json.dumps(final or payload) if status in ("approved", "edited", "auto_approved") else None,
-            "rule_id": "small-refund-30d" if auto else None, "callback_url": None,
+            "rule_id": ("readonly-commands" if action == "run_command" else "small-refund-30d") if auto else None,
+            "callback_url": None,
             "timeout_seconds": 300, "on_timeout": "deny", "created_at": _iso(created),
             "source": seed_sources.get(agent, "http"),
         })
     _exec("UPDATE rules SET times_used=3 WHERE id='small-refund-30d'")
+    _exec("UPDATE rules SET times_used=1 WHERE id='readonly-commands'")

@@ -4,6 +4,8 @@ Mandate never makes a judgment call. It routes: rules a human granted
 auto-approve, everything else escalates to a human. The LLM only explains.
 (The learning engine arrives in Phase 4.)
 """
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -34,6 +36,9 @@ CREATE TABLE IF NOT EXISTS rules (
   id TEXT PRIMARY KEY,
   name TEXT, conditions_json TEXT, action TEXT, source TEXT,
   times_used INTEGER DEFAULT 0, active INTEGER DEFAULT 1, created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, username TEXT UNIQUE, name TEXT, password_hash TEXT, created_at TEXT
 );
 """
 
@@ -586,6 +591,70 @@ def decide(approval_id, decision, final_payload=None, decided_by="human"):
     return get_approval(approval_id)
 
 
+# ---------------------------------------------------------------- human accounts
+# Agents authenticate with the API key; people sign in with a username and password.
+
+PBKDF2_ROUNDS = 200_000
+USERNAME_RE = re.compile(r"^[a-z0-9._-]{3,32}$")
+
+
+def _hash_password(password, salt=None):
+    salt = salt or os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ROUNDS)
+    return f"pbkdf2_sha256${PBKDF2_ROUNDS}${salt.hex()}${digest.hex()}"
+
+
+def _check_password(password, stored):
+    try:
+        _, rounds, salt, digest = stored.split("$")
+        test = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), int(rounds))
+        return hmac.compare_digest(test.hex(), digest)
+    except (ValueError, AttributeError):
+        return False
+
+
+def create_user(username, name, password):
+    """ValueError on bad input, Conflict if the username is taken."""
+    username = (username or "").strip().lower()
+    name = (name or "").strip()[:60]
+    if not USERNAME_RE.match(username):
+        raise ValueError("username must be 3-32 characters: letters, numbers, . _ -")
+    if not name:
+        raise ValueError("name is required")
+    if len(password or "") < 8:
+        raise ValueError("password must be at least 8 characters")
+    try:
+        _exec("INSERT INTO users VALUES (?,?,?,?,?)",
+              ("usr_" + uuid.uuid4().hex[:8], username, name, _hash_password(password), _iso(_now())))
+    except sqlite3.IntegrityError:
+        raise Conflict("that username is taken")
+    return get_user(username)
+
+
+def get_user(username):
+    rows = _query("SELECT id, username, name, created_at FROM users WHERE username=?",
+                  ((username or "").strip().lower(),))
+    return rows[0] if rows else None
+
+
+def verify_user(username, password):
+    rows = _query("SELECT * FROM users WHERE username=?", ((username or "").strip().lower(),))
+    if rows and _check_password(password or "", rows[0]["password_hash"]):
+        return get_user(username)
+    _hash_password(password or "")  # same work either way, so timing doesn't reveal valid usernames
+    return None
+
+
+def bootstrap_admin():
+    """Optional: create the first account from env, since SQLite resets on every redeploy."""
+    u, p = os.environ.get("MANDATE_ADMIN_USER"), os.environ.get("MANDATE_ADMIN_PASSWORD")
+    if u and p and not get_user(u):
+        try:
+            create_user(u, os.environ.get("MANDATE_ADMIN_NAME") or u, p)
+        except (ValueError, Conflict):
+            pass
+
+
 # ---------------------------------------------------------------- boot + seed
 
 def init_db():
@@ -596,6 +665,7 @@ def init_db():
         c.commit()
     if not _query("SELECT 1 FROM rules LIMIT 1"):
         _seed()
+    bootstrap_admin()
 
 
 def reset_db():

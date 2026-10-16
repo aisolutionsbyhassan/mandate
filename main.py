@@ -1,12 +1,15 @@
 import asyncio
+import base64
+import hashlib
 import hmac
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -63,12 +66,51 @@ async def lifespan(_app):
 app = FastAPI(title="Mandate", lifespan=lifespan)
 
 
-def require_key(x_mandate_key: Optional[str] = Header(None)):
+SESSION_COOKIE = "mandate_session"
+SESSION_TTL = 7 * 24 * 3600
+
+
+def _secret():
+    return (os.environ.get("MANDATE_SESSION_SECRET") or os.environ.get("MANDATE_API_KEY", "")).encode()
+
+
+def make_session(username):
+    payload = f"{username}|{int(time.time()) + SESSION_TTL}"
+    sig = hmac.new(_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(payload.encode()).decode() + "." + sig
+
+
+def read_session(token):
+    """The signed-in user for a session cookie, or None."""
+    try:
+        raw, sig = (token or "").split(".", 1)
+        payload = base64.urlsafe_b64decode(raw.encode()).decode()
+        good = hmac.new(_secret(), payload.encode(), hashlib.sha256).hexdigest()
+        username, exp = payload.rsplit("|", 1)
+        if hmac.compare_digest(sig, good) and int(exp) > time.time():
+            return core.get_user(username)
+    except (ValueError, UnicodeDecodeError):
+        pass
+    return None
+
+
+def require_key(request: Request, x_mandate_key: Optional[str] = Header(None)):
+    """Agents send the x-mandate-key header; people send a signed session cookie."""
     expected = os.environ.get("MANDATE_API_KEY", "")
     if not expected:
         raise HTTPException(503, "MANDATE_API_KEY is not configured on the server")
-    if not x_mandate_key or not hmac.compare_digest(x_mandate_key.encode(), expected.encode()):
-        raise HTTPException(401, "invalid or missing x-mandate-key header")
+    if x_mandate_key and hmac.compare_digest(x_mandate_key.encode(), expected.encode()):
+        return {"kind": "agent"}
+    user = read_session(request.cookies.get(SESSION_COOKIE))
+    if user:
+        return {"kind": "user", "user": user}
+    raise HTTPException(401, "sign in, or send a valid x-mandate-key header")
+
+
+def _set_session(response, request, username):
+    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    response.set_cookie(SESSION_COOKIE, make_session(username), max_age=SESSION_TTL,
+                        httponly=True, samesite="lax", secure=https)
 
 
 class ApprovalIn(BaseModel):
@@ -81,6 +123,18 @@ class ApprovalIn(BaseModel):
     timeout_seconds: int = Field(300, ge=1, le=86400)
     on_timeout: str = "deny"
     source: Optional[str] = None
+
+
+class SignupIn(BaseModel):
+    username: str
+    name: str
+    password: str
+    workspace_key: str
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
 
 
 class DecideIn(BaseModel):
@@ -101,6 +155,53 @@ def health():
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(request, "app.html", {})
+
+
+@app.post("/auth/signup")
+async def signup(body: SignupIn, request: Request, response: Response):
+    """Creating an account needs the workspace API key once, like an invite code."""
+    expected = os.environ.get("MANDATE_API_KEY", "")
+    if not expected or not hmac.compare_digest(body.workspace_key.strip().encode(), expected.encode()):
+        raise HTTPException(403, "that workspace key is not valid")
+    try:
+        user = await run_in_threadpool(core.create_user, body.username, body.name, body.password)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except core.Conflict as e:
+        raise HTTPException(409, str(e))
+    _set_session(response, request, user["username"])
+    return user
+
+
+@app.post("/auth/login")
+async def login(body: LoginIn, request: Request, response: Response):
+    user = await run_in_threadpool(core.verify_user, body.username, body.password)
+    if not user:
+        raise HTTPException(401, "wrong username or password")
+    _set_session(response, request, user["username"])
+    return user
+
+
+@app.post("/auth/logout")
+async def logout(response: Response):
+    response.delete_cookie(SESSION_COOKIE)
+    return {"status": "signed out"}
+
+
+@app.get("/auth/me")
+async def me(request: Request):
+    user = read_session(request.cookies.get(SESSION_COOKIE))
+    if not user:
+        raise HTTPException(401, "not signed in")
+    return user
+
+
+@app.get("/v1/connect-info")
+async def connect_info(who: dict = Depends(require_key)):
+    """The agent API key, for the Connect wizard. Only for signed-in people."""
+    if who["kind"] != "user":
+        raise HTTPException(403, "only signed-in people can view the agent key")
+    return {"api_key": os.environ.get("MANDATE_API_KEY", "")}
 
 
 @app.get("/integrations/claude_code_hook.py", response_class=PlainTextResponse)
@@ -140,10 +241,12 @@ async def get_agents():
     return await run_in_threadpool(core.agents)
 
 
-@app.post("/v1/decide/{approval_id}", dependencies=[Depends(require_key)])
-async def decide(approval_id: str, body: DecideIn):
+@app.post("/v1/decide/{approval_id}")
+async def decide(approval_id: str, body: DecideIn, who: dict = Depends(require_key)):
+    # a signed-in person is recorded by their account name, whatever the body says
+    decided_by = who["user"]["name"] if who["kind"] == "user" else body.decided_by
     try:
-        a = core.decide(approval_id, body.decision, body.final_payload, body.decided_by)
+        a = core.decide(approval_id, body.decision, body.final_payload, decided_by)
     except KeyError:
         raise HTTPException(404, "approval not found")
     except core.Conflict as e:

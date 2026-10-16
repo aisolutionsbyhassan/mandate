@@ -356,6 +356,9 @@
   .gate .err { color: var(--red-2); background: var(--red-bg); border: 1px solid var(--red-line); border-radius: 9px; padding: 8px 12px; font-size: 13px; margin: -6px 0 14px; }
   .gate .btn { width: 100%; margin-top: 4px; padding: 12px; }
   .gate .note { font-size: 12px; color: var(--faint); text-align: center; margin-top: 14px; }
+  .modes { display: flex; padding: 4px; background: var(--sky); border-radius: 11px; margin-bottom: 20px; }
+  .modes button { flex: 1; border: 0; background: transparent; padding: 8px; border-radius: 8px; font-size: 13.5px; font-weight: 600; color: var(--blue-2); cursor: pointer; }
+  .modes button.active { background: var(--navy); color: #fff; box-shadow: 0 4px 10px -4px rgba(10,24,48,.5); }
 
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--navy); color: #fff; padding: 11px 18px; border-radius: 12px; z-index: 60; font-size: 14px; box-shadow: 0 20px 40px -16px rgba(10,24,48,.6); }
 
@@ -556,14 +559,19 @@
       <span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z"/><path d="M8.5 12.5l2.3 2.3 4.7-5"/></svg></span>
       <div><div class="name">Mandate</div><div class="tagline">Human approval for AI agents</div></div>
     </div>
-    <h3>Open the approval console</h3>
-    <p>Enter the Mandate API key to approve, deny and edit what your agents want to do.</p>
+    <div class="modes" id="gateModes">
+      <button type="button" data-mode="login" class="active">Sign in</button>
+      <button type="button" data-mode="signup">Create account</button>
+    </div>
+    <h3 id="gateTitle">Welcome back</h3>
+    <p id="gateSub">Sign in to approve, deny and edit what your agents want to do.</p>
     <div class="err hidden" id="gateErr"></div>
-    <label>API key <input type="password" id="gateKey" required></label>
-    <label>Your name <input type="text" id="gateName" required></label>
-    <button class="btn primary" type="submit">Open console</button>
-    <button class="btn ghost hidden" type="button" id="gateCancel" style="width:100%;margin-top:8px">Cancel</button>
-    <div class="note">Your name is recorded on every decision you make.</div>
+    <label class="su hidden">Full name <input type="text" id="gateName" autocomplete="name" placeholder="Hamza Mughal"></label>
+    <label>Username <input type="text" id="gateUser" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+    <label>Password <input type="password" id="gatePass" autocomplete="current-password" required></label>
+    <label class="su hidden">Workspace key <input type="password" id="gateKey" autocomplete="off" placeholder="the MANDATE_API_KEY of this server"></label>
+    <button class="btn primary" type="submit" id="gateBtn">Sign in</button>
+    <div class="note" id="gateNote">Agents connect with the API key. People sign in, so every decision shows who made it.</div>
   </form>
 </div>
 
@@ -573,7 +581,8 @@ const ls = {
   get(k, d) { try { return localStorage.getItem(k) || d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
-const state = { key: ls.get("mandate_key", ""), name: ls.get("mandate_name", "hamza"), rows: [], agents: [], autonomy: 0 };
+const state = { user: null, agentKey: "", rows: [], agents: [], autonomy: 0 };
+try { localStorage.removeItem("mandate_key"); } catch {}  // older builds kept the API key in the browser
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const money = n => "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -600,9 +609,9 @@ function toast(msg) {
 }
 
 async function api(path, opts = {}) {
-  const r = await fetch(path, { ...opts, headers: { "content-type": "application/json", "x-mandate-key": state.key } });
+  const r = await fetch(path, { ...opts, credentials: "same-origin", headers: { "content-type": "application/json" } });
   if (r.status === 401 || r.status === 503) {
-    showGate(r.status === 503 ? "The server has no MANDATE_API_KEY configured." : "That key was rejected.");
+    showGate(r.status === 503 ? "The server has no MANDATE_API_KEY configured." : "Your session ended. Please sign in again.");
     throw new Error("auth");
   }
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
@@ -759,7 +768,7 @@ function renderBanner() {
 async function decide(id, decision, finalPayload, el) {
   el.querySelectorAll("button").forEach(b => b.disabled = true);
   try {
-    await api(`/v1/decide/${id}`, { method: "POST", body: JSON.stringify({ decision, final_payload: finalPayload, decided_by: state.name }) });
+    await api(`/v1/decide/${id}`, { method: "POST", body: JSON.stringify({ decision, final_payload: finalPayload }) });
     removeCard(id);
   } catch (e) {
     el.querySelectorAll("button").forEach(b => b.disabled = false);
@@ -1053,7 +1062,7 @@ Zap 2: Webhooks by Zapier > Catch Hook
 function renderWizard() {
   $("#srcTabs").innerHTML = Object.entries(SOURCES).map(([k, v]) =>
     `<button data-src="${k}" class="${k === wiz.src ? "active" : ""}">${v}</button>`).join("");
-  const url = location.origin, realKey = state.key || "YOUR_API_KEY";
+  const url = location.origin, realKey = state.agentKey || "YOUR_API_KEY";
   const shown = wiz.reveal ? realKey : "•".repeat(Math.min(realKey.length, 24));
   const [hint, code] = snippet(wiz.src, url, "{{KEY}}");
   const done = wiz.connected[wiz.src];
@@ -1079,7 +1088,13 @@ function renderWizard() {
   wiz.code = code.replaceAll("{{KEY}}", realKey);
 }
 
-function openWizard() { wiz.open = true; wiz.connected = {}; wiz.reveal = false; $("#wizard").classList.remove("hidden"); renderWizard(); }
+async function openWizard() {
+  wiz.open = true; wiz.connected = {}; wiz.reveal = false;
+  $("#wizard").classList.remove("hidden"); renderWizard();
+  if (!state.agentKey) {
+    try { state.agentKey = (await api("/v1/connect-info")).api_key; if (wiz.open) renderWizard(); } catch {}
+  }
+}
 function closeWizard() { wiz.open = false; $("#wizard").classList.add("hidden"); }
 
 function wizardHit(a) {
@@ -1108,7 +1123,7 @@ $("#wizard").addEventListener("click", e => {
   if (e.target.dataset.src) { wiz.src = e.target.dataset.src; return renderWizard(); }
   const w = e.target.dataset.w;
   if (w === "reveal") { wiz.reveal = !wiz.reveal; renderWizard(); }
-  if (w === "copykey") copyText(state.key, e.target);
+  if (w === "copykey") copyText(state.agentKey, e.target);
   if (w === "copycode") copyText(wiz.code, e.target);
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && wiz.open) closeWizard(); });
@@ -1166,7 +1181,7 @@ function scheduleRefresh() {
 function connect() {
   const es = new EventSource("/events");
   const live = $("#live");
-  es.onopen = () => { live.classList.add("on"); live.lastChild.textContent = "Live · connected"; if (state.key) loadAll().catch(() => {}); };
+  es.onopen = () => { live.classList.add("on"); live.lastChild.textContent = "Live · connected"; if (state.user) loadAll().catch(() => {}); };
   es.onerror = () => { live.classList.remove("on"); live.lastChild.textContent = "Reconnecting…"; };
   es.addEventListener("approval", e => {
     const a = JSON.parse(e.data);
@@ -1201,38 +1216,78 @@ $("#resetBtn").addEventListener("click", async e => {
   finally { e.target.disabled = false; }
 });
 
-/* ---------- key gate + user ---------- */
+/* ---------- accounts: sign in / create account / sign out ---------- */
+let gateMode = "login";
 function renderUser() {
-  $("#userName").textContent = state.name;
-  $("#userAv").textContent = (state.name || "?").trim().slice(0, 1);
+  const name = state.user ? state.user.name : "";
+  $("#userName").textContent = name || "Signed out";
+  $("#userAv").textContent = (name || "?").trim().slice(0, 1);
+  $("#userChip").title = state.user ? `Signed in as @${state.user.username}. Click to sign out.` : "";
+}
+function setGateMode(mode) {
+  gateMode = mode;
+  const su = mode === "signup";
+  document.querySelectorAll("#gateModes button").forEach(b => b.classList.toggle("active", b.dataset.mode === mode));
+  document.querySelectorAll(".gate .su").forEach(el => el.classList.toggle("hidden", !su));
+  $("#gateTitle").textContent = su ? "Create your account" : "Welcome back";
+  $("#gateSub").textContent = su ? "Join this Mandate workspace. You need its workspace key once; after that you sign in with your password."
+                                 : "Sign in to approve, deny and edit what your agents want to do.";
+  $("#gateBtn").textContent = su ? "Create account" : "Sign in";
+  $("#gatePass").autocomplete = su ? "new-password" : "current-password";
+  $("#gateName").required = $("#gateKey").required = su;
+  $("#gateErr").classList.add("hidden");
 }
 function showGate(err) {
   $("#gate").classList.remove("hidden");
   $("#gateErr").textContent = err || "";
   $("#gateErr").classList.toggle("hidden", !err);
-  $("#gateName").value = state.name;
-  $("#gateKey").value = "";
-  $("#gateCancel").classList.toggle("hidden", !state.key || !!err);
-  $("#gateKey").focus();
+  $("#gatePass").value = "";
+  (gateMode === "signup" ? $("#gateName") : $("#gateUser")).focus();
 }
-$("#userChip").addEventListener("click", () => showGate());
-$("#gateCancel").addEventListener("click", () => $("#gate").classList.add("hidden"));
+$("#gateModes").addEventListener("click", e => { if (e.target.dataset.mode) setGateMode(e.target.dataset.mode); });
 $("#gateForm").addEventListener("submit", async e => {
   e.preventDefault();
-  state.key = $("#gateKey").value.trim();
-  state.name = $("#gateName").value.trim() || "human";
-  ls.set("mandate_key", state.key); ls.set("mandate_name", state.name);
-  renderUser();
-  $("#gate").classList.add("hidden");
-  loadAll().catch(() => {});
+  const su = gateMode === "signup";
+  const body = { username: $("#gateUser").value.trim(), password: $("#gatePass").value };
+  if (su) Object.assign(body, { name: $("#gateName").value.trim(), workspace_key: $("#gateKey").value.trim() });
+  $("#gateBtn").disabled = true;
+  try {
+    const r = await fetch(su ? "/auth/signup" : "/auth/login", { method: "POST", credentials: "same-origin",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "Please fill in every field.");
+    state.user = d;
+    $("#gateKey").value = ""; $("#gatePass").value = "";
+    renderUser();
+    $("#gate").classList.add("hidden");
+    loadAll().catch(() => {});
+  } catch (err) {
+    $("#gateErr").textContent = err.message; $("#gateErr").classList.remove("hidden");
+  } finally { $("#gateBtn").disabled = false; }
+});
+$("#userChip").addEventListener("click", async () => {
+  if (!state.user || !confirm(`Sign out of Mandate, ${state.user.name}?`)) return;
+  await fetch("/auth/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
+  state.user = null; state.agentKey = "";
+  document.querySelectorAll(".card").forEach(c => c.remove());
+  renderUser(); updateCount(); setGateMode("login"); showGate();
 });
 
+async function boot() {
+  try {
+    const r = await fetch("/auth/me", { credentials: "same-origin" });
+    if (r.ok) { state.user = await r.json(); renderUser(); loadAll().catch(() => {}); return; }
+  } catch {}
+  showGate();
+}
+
 renderUser();
+setGateMode("login");
 showTab(ls.get("mandate_tab", "overview"));
 renderOverview();
 updateCount();
 connect();
-if (!state.key) showGate();
+boot();
 </script>
 {% endraw %}
 </body>

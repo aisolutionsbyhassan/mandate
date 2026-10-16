@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mandate</title>
+<style>
+  :root {
+    --bg: #0a0c0f; --panel: #11141a; --panel-2: #161a21; --border: #232832; --border-2: #2e3440;
+    --text: #e8eaed; --muted: #8b93a1; --faint: #5d6573;
+    --accent: #8b9dff; --accent-ink: #0b0f24;
+    --red: #f87171; --amber: #fbbf24; --green: #34d399;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--text); line-height: 1.5;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, textarea { font: inherit; color: inherit; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .hidden { display: none !important; }
+
+  /* header */
+  header {
+    position: sticky; top: 0; z-index: 10; background: rgba(10,12,15,.88); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .bar { max-width: 1320px; margin: 0 auto; padding: 14px 28px; display: flex; align-items: center; gap: 28px; }
+  .brand { font-weight: 800; letter-spacing: .3em; font-size: 15px; }
+  nav { display: flex; gap: 4px; }
+  nav button {
+    background: none; border: 1px solid transparent; border-radius: 999px; padding: 6px 16px;
+    color: var(--muted); cursor: pointer; font-size: 14px; display: inline-flex; gap: 8px; align-items: center;
+  }
+  nav button:hover { color: var(--text); }
+  nav button.active { color: var(--text); border-color: var(--border-2); background: var(--panel); }
+  nav .count {
+    background: var(--red); color: #1a0606; font-weight: 700; font-size: 11px; border-radius: 999px;
+    min-width: 18px; height: 18px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center;
+  }
+  .spacer { flex: 1; }
+  .live { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+  .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .live.on i { background: var(--green); box-shadow: 0 0 0 3px rgba(52,211,153,.18); }
+  .meter-sm { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
+  .meter-sm .track { width: 140px; }
+  .meter-sm b { color: var(--text); font-size: 15px; min-width: 40px; text-align: right; }
+  .track { height: 8px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+  .fill { height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width .8s cubic-bezier(.2,.8,.2,1); }
+
+  main { max-width: 1320px; margin: 0 auto; padding: 32px 28px 80px; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  h2 { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0; }
+  .col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; min-height: 24px; }
+
+  /* inbox */
+  .inbox { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 32px; align-items: start; }
+  #cards { display: flex; flex-direction: column; gap: 20px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px 26px;
+    animation: enter .35s ease-out;
+  }
+  .card.paused { border-color: var(--red); animation: enter .35s ease-out, paused 1.6s ease-in-out infinite; }
+  @keyframes paused {
+    0%, 100% { box-shadow: 0 0 0 1px rgba(248,113,113,.55), 0 0 0 0 rgba(248,113,113,0); }
+    50% { box-shadow: 0 0 0 1px rgba(248,113,113,1), 0 0 28px 2px rgba(248,113,113,.28); }
+  }
+  @keyframes enter { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+  .card.leaving { opacity: 0; transform: scale(.98); transition: all .3s; }
+  .card-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .badge {
+    font-size: 12px; font-weight: 700; letter-spacing: .06em; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid currentColor;
+  }
+  .badge.high { color: var(--red); background: rgba(248,113,113,.08); }
+  .badge.med { color: var(--amber); background: rgba(251,191,36,.08); }
+  .badge.low { color: var(--green); background: rgba(52,211,153,.08); }
+  .paused-tag { color: var(--red); font-weight: 800; font-size: 12px; letter-spacing: .16em; display: inline-flex; align-items: center; gap: 6px; }
+  .paused-tag::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .timer { margin-left: auto; color: var(--muted); font-size: 14px; }
+  .timer b { color: var(--text); font-weight: 600; }
+  .card h3 { margin: 0 0 18px; font-weight: 500; font-size: 15px; color: var(--muted); }
+  .card h3 strong { display: block; color: var(--text); font-size: 30px; font-weight: 750; letter-spacing: -.01em; line-height: 1.15; margin-top: 2px; }
+  .fields { display: flex; flex-wrap: wrap; gap: 1px; background: var(--border);
+            border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 0 0 20px; }
+  .fields div { background: var(--panel-2); padding: 10px 14px; min-width: 0; flex: 1 1 150px; }
+  .fields dt { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .fields dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+  .fields dd.big { font-size: 22px; }
+  .fields div.wide { flex-basis: 100%; }
+  .fields div.wide dd { font-weight: 450; font-size: 14px; color: #c9ced6; }
+  .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; margin-bottom: 6px; }
+  .why ul { margin: 0 0 18px; padding-left: 18px; }
+  .why li { margin: 3px 0; }
+  .why li::marker { color: var(--red); }
+  blockquote { margin: 0 0 18px; padding: 10px 14px; border-left: 2px solid var(--border-2); color: #c9ced6; font-style: italic; background: rgba(255,255,255,.015); border-radius: 0 8px 8px 0; }
+  .impact { padding: 12px 14px; border-radius: 10px; background: rgba(248,113,113,.06); border: 1px solid rgba(248,113,113,.22); margin-bottom: 22px; }
+  .impact .label { color: var(--red); margin: 0 0 2px; }
+  .ctx { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 20px; }
+  .chip { font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
+  .chip.warn { color: var(--amber); border-color: rgba(251,191,36,.35); }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn {
+    border-radius: 10px; padding: 11px 20px; font-weight: 650; font-size: 14px; cursor: pointer;
+    border: 1px solid var(--border-2); background: var(--panel-2); transition: transform .08s, background .15s, border-color .15s;
+  }
+  .btn:hover { border-color: var(--muted); }
+  .btn:active { transform: scale(.98); }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { color: var(--red); border-color: rgba(248,113,113,.45); background: transparent; }
+  .btn.danger:hover { background: rgba(248,113,113,.08); border-color: var(--red); }
+  .btn.ghost { background: transparent; }
+  form.edit { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--border-2); }
+  form.edit .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  form.edit label { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  form.edit .wide { grid-column: 1 / -1; }
+  input, textarea {
+    width: 100%; margin-top: 4px; background: var(--bg); border: 1px solid var(--border-2); border-radius: 8px;
+    padding: 9px 11px; outline: none; font-size: 15px;
+  }
+  input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139,157,255,.18); }
+  textarea { min-height: 80px; resize: vertical; }
+
+  .empty { border: 1px dashed var(--border-2); border-radius: var(--radius); padding: 56px 24px; text-align: center; color: var(--muted); }
+  .empty strong { display: block; color: var(--text); font-size: 18px; margin-bottom: 4px; }
+
+  /* feed */
+  aside.feed { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 0 8px; position: sticky; top: 84px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; }
+  aside.feed .col-head { padding: 0 20px; }
+  #feed { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+  #feed li { display: grid; grid-template-columns: 70px 108px 1fr; gap: 8px; padding: 9px 20px; font-size: 13px; border-top: 1px solid var(--border); align-items: baseline; }
+  #feed li.new { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background: rgba(139,157,255,.14); } to { background: transparent; } }
+  #feed time { color: var(--faint); }
+  #feed .what { color: #c9ced6; min-width: 0; overflow-wrap: anywhere; }
+  #feed .what span { color: var(--muted); }
+  .tag { font-weight: 700; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+  .t-auto_approved { color: var(--green); } .t-pending { color: var(--red); } .t-approved { color: var(--accent); }
+  .t-edited { color: var(--amber); } .t-denied { color: var(--red); } .t-timed_out { color: var(--faint); }
+  #feed li.paused-line { background: rgba(248,113,113,.05); }
+
+  /* policies */
+  .hero { display: grid; grid-template-columns: auto 1fr; gap: 36px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px 36px; margin-bottom: 40px; }
+  .hero .num { font-size: 76px; font-weight: 800; letter-spacing: -.04em; line-height: 1; }
+  .hero .num small { font-size: 36px; color: var(--muted); }
+  .hero .track { height: 14px; margin: 10px 0 12px; }
+  .hero p { margin: 0; color: var(--muted); }
+  .section { margin-bottom: 40px; }
+  .proposal { background: linear-gradient(180deg, rgba(139,157,255,.07), transparent 70%), var(--panel); border: 1px solid rgba(139,157,255,.45); border-radius: var(--radius); padding: 24px 26px; margin-bottom: 16px; }
+  .proposal .kicker { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; margin-bottom: 8px; }
+  .proposal p { font-size: 20px; margin: 0 0 6px; font-weight: 600; }
+  .proposal .cond { color: var(--muted); margin-bottom: 18px; font-size: 14px; }
+  .rules { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .rule { display: grid; grid-template-columns: 1fr auto; gap: 16px; padding: 18px 22px; background: var(--panel); align-items: center; }
+  .rule + .rule { border-top: 1px solid var(--border); }
+  .rule .name { font-weight: 600; }
+  .rule .cond { color: var(--muted); font-size: 14px; }
+  .rule .meta { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+  .pill { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-2); color: var(--muted); }
+  .pill.auto { color: var(--green); border-color: rgba(52,211,153,.4); }
+  .pill.ask { color: var(--amber); border-color: rgba(251,191,36,.4); }
+  .pill.learned { color: var(--accent); border-color: rgba(139,157,255,.45); }
+
+  /* history */
+  .table-wrap { border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; background: var(--panel); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; white-space: nowrap; }
+  th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+  td { padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: 0; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td .old { color: var(--faint); text-decoration: line-through; margin-right: 6px; }
+
+  /* key gate */
+  .gate { position: fixed; inset: 0; z-index: 50; background: rgba(5,6,8,.78); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .gate form { width: 100%; max-width: 400px; background: var(--panel); border: 1px solid var(--border-2); border-radius: 18px; padding: 30px; }
+  .gate h3 { margin: 0 0 4px; font-size: 20px; }
+  .gate p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+  .gate label { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 14px; }
+  .gate .err { color: var(--red); font-size: 13px; margin: -6px 0 12px; }
+  .gate .btn { width: 100%; }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--red); color: var(--text); padding: 10px 18px; border-radius: 10px; z-index: 60; font-size: 14px; }
+
+  @media (max-width: 1000px) {
+    .inbox { grid-template-columns: 1fr; }
+    aside.feed { position: static; max-height: 420px; }
+  }
+  @media (max-width: 680px) {
+    .bar { flex-wrap: wrap; gap: 12px 16px; padding: 12px 16px; }
+    nav { order: 3; width: 100%; }
+    .meter-sm .track { width: 80px; }
+    .meter-sm span.lbl { display: none; }
+    main { padding: 20px 16px 60px; }
+    .card { padding: 20px; }
+    .card h3 strong { font-size: 24px; }
+    .hero { grid-template-columns: 1fr; gap: 12px; padding: 24px; }
+    .hero .num { font-size: 56px; }
+    #feed li { grid-template-columns: 64px 1fr; }
+    #feed li .what { grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+{% raw %}
+<header>
+  <div class="bar">
+    <div class="brand">MANDATE</div>
+    <nav>
+      <button data-tab="inbox" class="active">Inbox <span class="count hidden" id="navCount">0</span></button>
+      <button data-tab="policies">Policies</button>
+      <button data-tab="history">History</button>
+    </nav>
+    <div class="spacer"></div>
+    <div class="live" id="live"><i></i><span>connecting</span></div>
+    <div class="meter-sm" title="Share of the last 50 actions handled by rules you granted">
+      <span class="lbl">Autonomy</span>
+      <div class="track"><div class="fill" id="meterSm"></div></div>
+      <b id="pctSm">–</b>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="tab active" id="tab-inbox">
+    <div class="inbox">
+      <div>
+        <div class="col-head"><h2>Waiting for a human</h2></div>
+        <div id="cards"></div>
+        <div class="empty" id="emptyInbox">
+          <strong>Nothing is waiting on you</strong>
+          Agents are running inside the mandates you granted. Anything risky will appear here.
+        </div>
+      </div>
+      <aside class="feed">
+        <div class="col-head"><h2>Live activity</h2></div>
+        <ol id="feed"></ol>
+      </aside>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-policies">
+    <div class="hero">
+      <div class="num"><span id="pctBig">0</span><small>%</small></div>
+      <div>
+        <h2>Agent autonomy</h2>
+        <div class="track"><div class="fill" id="meterBig"></div></div>
+        <p>of the last 50 agent actions ran without waiting for a human, because a rule you granted covered them.</p>
+      </div>
+    </div>
+    <div class="section" id="proposalsWrap">
+      <div class="col-head"><h2>Mandate suggests</h2></div>
+      <div id="proposals"></div>
+    </div>
+    <div class="section">
+      <div class="col-head"><h2>Active mandates</h2></div>
+      <div class="rules" id="rules"></div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-history">
+    <div class="col-head"><h2>Last 50 decisions</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Agent</th><th>Action</th><th>Amount</th><th>Decision</th><th>Decided by</th><th>Rule applied</th><th style="text-align:right">Latency</th></tr></thead>
+        <tbody id="history"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<div class="gate hidden" id="gate">
+  <form id="gateForm" autocomplete="off">
+    <h3>Open the inbox</h3>
+    <p>Enter the Mandate API key to approve and deny agent actions.</p>
+    <div class="err hidden" id="gateErr"></div>
+    <label>API key <input type="password" id="gateKey" required></label>
+    <label>Your name <input type="text" id="gateName" required></label>
+    <button class="btn primary" type="submit">Open inbox</button>
+  </form>
+</div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const ls = {
+  get(k, d) { try { return localStorage.getItem(k) || d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const state = { key: ls.get("mandate_key", ""), name: ls.get("mandate_name", "hamza"), dismissed: new Set() };
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = n => "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
+const clock = iso => new Date(iso).toLocaleTimeString("en-GB", { hour12: false });
+const human = s => String(s).replace(/_/g, " ");
+const riskClass = n => n >= 70 ? "high" : n >= 40 ? "med" : "low";
+const mmss = secs => `${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, "0")}`;
+const hasAmount = p => p && p.amount !== undefined && p.amount !== null && !isNaN(Number(p.amount));
+
+function label(a, p = a.payload || {}) {
+  if (a.action_type === "issue_refund") return `refund ${hasAmount(p) ? money(p.amount) : ""}`;
+  if (a.action_type === "email_customer") return `email ${p.email || ""}`;
+  if (a.action_type === "delete_account") return `delete account ${p.user_id || ""}`;
+  return human(a.action_type);
+}
+
+function toast(msg) {
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { "content-type": "application/json", "x-mandate-key": state.key } });
+  if (r.status === 401 || r.status === 503) {
+    showGate(r.status === 503 ? "The server has no MANDATE_API_KEY configured." : "That key was rejected.");
+    throw new Error("auth");
+  }
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`);
+  return r.json();
+}
+
+/* ---------- tabs ---------- */
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x === b));
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.id === "tab-" + b.dataset.tab));
+}));
+
+/* ---------- inbox cards ---------- */
+function fieldsHtml(p) {
+  return Object.entries(p || {}).map(([k, v]) => {
+    const isAmt = k === "amount" && !isNaN(Number(v));
+    const val = isAmt ? money(v) : typeof v === "object" ? JSON.stringify(v) : v;
+    const long = String(val).length > 32;
+    return `<div class="${long ? "wide" : ""}"><dt>${esc(human(k))}</dt><dd class="${isAmt ? "big" : ""}">${esc(val)}</dd></div>`;
+  }).join("");
+}
+
+function ctxHtml(c) {
+  const chips = [];
+  if (!c) return "";
+  if (c.customer) chips.push(["customer: " + c.customer]);
+  if (c.order_age_days != null) {
+    const over = c.policy_limit_days != null && c.order_age_days > c.policy_limit_days;
+    chips.push([`order ${c.order_age_days} days old` + (c.policy_limit_days != null ? ` · limit ${c.policy_limit_days}` : ""), over]);
+  }
+  if (c.prior_refunds_60d) chips.push([`${c.prior_refunds_60d} refunds in 60 days`, c.prior_refunds_60d >= 2]);
+  if (c.recipients) chips.push([`${c.recipients} recipients`, c.recipients > 100]);
+  if (!chips.length) return "";
+  return `<div class="ctx">${chips.map(([t, w]) => `<span class="chip ${w ? "warn" : ""}">${esc(t)}</span>`).join("")}</div>`;
+}
+
+function editFormHtml(p) {
+  return Object.entries(p || {}).map(([k, v]) => {
+    const isNum = typeof v === "number";
+    const long = typeof v === "string" && v.length > 60;
+    const val = typeof v === "object" ? JSON.stringify(v) : v;
+    const ctrl = long
+      ? `<textarea name="${esc(k)}">${esc(val)}</textarea>`
+      : `<input name="${esc(k)}" type="${isNum ? "number" : "text"}" ${isNum ? 'step="any"' : ""} value="${esc(val)}">`;
+    return `<label class="${long ? "wide" : ""}">${esc(human(k))}${ctrl}</label>`;
+  }).join("");
+}
+
+function addCard(a, append = false) {
+  if (document.getElementById("card-" + a.id)) return;
+  const el = document.createElement("article");
+  el.className = "card paused";
+  el.id = "card-" + a.id;
+  el.innerHTML = `
+    <div class="card-top">
+      <span class="badge ${riskClass(a.risk_score)}">RISK ${a.risk_score}</span>
+      <span class="paused-tag">PAUSED</span>
+      <span class="timer">waiting <b class="mono" data-since="${esc(a.created_at)}">0:00</b></span>
+    </div>
+    <h3>${esc(a.agent)} wants to: <strong>${esc(human(a.action_type).toUpperCase())}</strong></h3>
+    <dl class="fields">${fieldsHtml(a.payload)}</dl>
+    ${ctxHtml(a.context)}
+    <div class="why"><div class="label">Why this is flagged:</div>
+      <ul>${(a.risk_reasons || []).map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>
+    ${a.reasoning ? `<div class="label">Agent's reasoning:</div><blockquote>“${esc(a.reasoning)}”</blockquote>` : ""}
+    ${a.impact_if_wrong ? `<div class="impact"><div class="label">If this is wrong:</div>${esc(a.impact_if_wrong)}</div>` : ""}
+    <div class="actions">
+      <button class="btn primary" data-act="approved">Approve</button>
+      <button class="btn danger" data-act="denied">Deny</button>
+      <button class="btn ghost" data-act="edit">Edit &amp; Approve</button>
+    </div>
+    <form class="edit hidden">
+      <div class="grid">${editFormHtml(a.payload)}</div>
+      <div class="actions">
+        <button class="btn primary" type="submit">Approve with these values</button>
+        <button class="btn ghost" type="button" data-act="cancel">Cancel</button>
+      </div>
+    </form>`;
+
+  el.querySelector(".actions").addEventListener("click", e => {
+    const act = e.target.dataset.act;
+    if (act === "edit") { el.querySelector("form.edit").classList.remove("hidden"); el.querySelector("form.edit input, form.edit textarea")?.focus(); }
+    else if (act) decide(a.id, act, null, el);
+  });
+  const form = el.querySelector("form.edit");
+  form.querySelector("[data-act=cancel]").addEventListener("click", () => form.classList.add("hidden"));
+  form.addEventListener("submit", e => {
+    e.preventDefault();
+    const out = {};
+    for (const [k, orig] of Object.entries(a.payload || {})) {
+      const raw = form.elements[k].value;
+      if (typeof orig === "number") out[k] = Number(raw);
+      else if (typeof orig === "object" && orig !== null) { try { out[k] = JSON.parse(raw); } catch { out[k] = raw; } }
+      else if (typeof orig === "boolean") out[k] = raw === "true";
+      else out[k] = raw;
+    }
+    decide(a.id, "edited", out, el);
+  });
+
+  const cards = $("#cards");
+  append ? cards.appendChild(el) : cards.prepend(el);
+  tick(); updateCount();
+}
+
+function removeCard(id) {
+  const el = document.getElementById("card-" + id);
+  if (!el) return;
+  el.classList.add("leaving");
+  setTimeout(() => { el.remove(); updateCount(); }, 300);
+}
+
+function updateCount() {
+  const n = document.querySelectorAll(".card:not(.leaving)").length;
+  $("#emptyInbox").classList.toggle("hidden", n > 0);
+  $("#navCount").textContent = n;
+  $("#navCount").classList.toggle("hidden", n === 0);
+  document.title = n ? `(${n}) Mandate` : "Mandate";
+}
+
+async function decide(id, decision, finalPayload, el) {
+  el.querySelectorAll("button").forEach(b => b.disabled = true);
+  try {
+    await api(`/v1/decide/${id}`, { method: "POST", body: JSON.stringify({ decision, final_payload: finalPayload, decided_by: state.name }) });
+    removeCard(id);
+  } catch (e) {
+    el.querySelectorAll("button").forEach(b => b.disabled = false);
+    if (e.message !== "auth") { toast(e.message); if (/already|decided/.test(e.message)) removeCard(id); }
+  }
+}
+
+function tick() {
+  const now = Date.now();
+  document.querySelectorAll("[data-since]").forEach(el => {
+    el.textContent = mmss(Math.max(0, (now - Date.parse(el.dataset.since)) / 1000));
+  });
+}
+setInterval(tick, 1000);
+
+/* ---------- activity feed ---------- */
+function feedItem(a) {
+  const t = a.status === "pending" ? a.created_at : (a.decided_at || a.created_at);
+  let what;
+  switch (a.status) {
+    case "auto_approved": what = `${esc(label(a))} <span>· rule: ${esc(a.rule_id || "")}</span>`; break;
+    case "pending": what = `${esc(label(a))} <span>· waiting for human</span>`; break;
+    case "edited": what = `${esc(label(a))} → ${esc(label(a, a.final_payload || {}))} <span>· by ${esc(a.decided_by)}</span>`; break;
+    case "timed_out": what = `${esc(label(a))} <span>· nobody answered</span>`; break;
+    default: what = `${esc(label(a))} <span>· by ${esc(a.decided_by)}</span>`;
+  }
+  const tag = { auto_approved: "auto-approved", pending: "PAUSED", timed_out: "timed out" }[a.status] || a.status;
+  return { t, html: `<time class="mono">${clock(t)}</time><span class="tag t-${a.status}">${tag}</span><span class="what">${what}</span>`, paused: a.status === "pending" };
+}
+
+function addFeed(a, isNew = true) {
+  const f = feedItem(a);
+  const li = document.createElement("li");
+  li.innerHTML = f.html;
+  if (f.paused) li.classList.add("paused-line");
+  if (isNew) li.classList.add("new");
+  const feed = $("#feed");
+  feed.prepend(li);
+  while (feed.children.length > 60) feed.lastChild.remove();
+}
+
+/* ---------- policies + meter ---------- */
+function setMeter(pct) {
+  $("#meterSm").style.width = pct + "%";
+  $("#meterBig").style.width = pct + "%";
+  $("#pctSm").textContent = pct + "%";
+  $("#pctBig").textContent = pct;
+}
+
+async function loadPolicies() {
+  const d = await api("/v1/policies");
+  setMeter(d.autonomy_score);
+  const props = d.proposals.filter(p => !state.dismissed.has(p.id));
+  $("#proposalsWrap").classList.toggle("hidden", props.length === 0);
+  $("#proposals").innerHTML = props.map(p => `
+    <div class="proposal" data-id="${esc(p.id)}">
+      <div class="kicker">Proposed mandate</div>
+      <p>${esc(p.name)}</p>
+      <div class="cond">Covers: ${esc(p.description)}</div>
+      <div class="actions">
+        <button class="btn primary" data-grant="${esc(p.id)}">Grant this mandate</button>
+        <button class="btn ghost" data-keep="${esc(p.id)}">Keep asking</button>
+      </div>
+    </div>`).join("");
+  $("#rules").innerHTML = d.rules.map(r => `
+    <div class="rule">
+      <div><div class="name">${esc(r.name)}</div><div class="cond">${esc(r.description)}</div></div>
+      <div class="meta">
+        ${r.source === "learned" ? '<span class="pill learned">learned</span>' : ""}
+        <span class="pill ${r.action === "auto_approve" ? "auto" : "ask"}">${r.action === "auto_approve" ? "auto-approve" : "always ask"}</span>
+        <span class="mono">used ${r.times_used}×</span>
+      </div>
+    </div>`).join("") || `<div class="empty">No active mandates yet.</div>`;
+}
+
+$("#proposals").addEventListener("click", async e => {
+  const grant = e.target.dataset.grant, keep = e.target.dataset.keep;
+  if (keep) { state.dismissed.add(keep); loadPolicies(); }
+  if (grant) {
+    e.target.disabled = true;
+    try { await api(`/v1/policies/${grant}/grant`, { method: "POST" }); await loadPolicies(); }
+    catch (err) { e.target.disabled = false; if (err.message !== "auth") toast(err.message); }
+  }
+});
+
+/* ---------- history ---------- */
+const decisionLabel = { auto_approved: "auto-approved", timed_out: "timed out" };
+
+async function loadHistory() {
+  const rows = await api("/v1/approvals?limit=50");
+  $("#history").innerHTML = rows.map(a => {
+    const p = a.payload || {}, f = a.final_payload || {};
+    let amount = hasAmount(p) ? money(p.amount) : "—";
+    if (a.status === "edited" && hasAmount(f) && Number(f.amount) !== Number(p.amount))
+      amount = `<span class="old">${money(p.amount)}</span>${money(f.amount)}`;
+    const latency = a.status === "pending"
+      ? `<b class="mono" data-since="${esc(a.created_at)}"></b>`
+      : a.decided_at ? ((Date.parse(a.decided_at) - Date.parse(a.created_at)) / 1000).toFixed(0) + "s" : "—";
+    return `<tr>
+      <td class="mono">${clock(a.created_at)}</td>
+      <td>${esc(a.agent)}</td>
+      <td>${esc(human(a.action_type))}</td>
+      <td class="num">${amount}</td>
+      <td><span class="tag t-${a.status}">${esc(decisionLabel[a.status] || a.status)}</span></td>
+      <td>${esc(a.decided_by || "—")}</td>
+      <td class="mono">${esc(a.rule_id || "—")}</td>
+      <td class="num mono">${latency}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:40px">No decisions yet.</td></tr>`;
+  tick();
+  return rows;
+}
+
+/* ---------- load + live updates ---------- */
+async function loadAll() {
+  const rows = await loadHistory();
+  const pending = rows.filter(a => a.status === "pending");
+  const ids = new Set(pending.map(a => "card-" + a.id));
+  document.querySelectorAll(".card").forEach(c => { if (!ids.has(c.id)) c.remove(); });
+  pending.forEach(a => addCard(a, true));
+  $("#feed").innerHTML = "";
+  rows.slice(0, 30).map(a => [feedItem(a).t, a]).sort((x, y) => Date.parse(x[0]) - Date.parse(y[0]))
+    .forEach(([, a]) => addFeed(a, false));
+  updateCount();
+  await loadPolicies();
+}
+
+let refreshTimer;
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => { loadPolicies().catch(() => {}); loadHistory().catch(() => {}); }, 300);
+}
+
+function connect() {
+  const es = new EventSource("/events");
+  const live = $("#live");
+  es.onopen = () => { live.classList.add("on"); live.lastChild.textContent = "live"; if (state.key) loadAll().catch(() => {}); };
+  es.onerror = () => { live.classList.remove("on"); live.lastChild.textContent = "reconnecting"; };
+  es.addEventListener("approval", e => {
+    const a = JSON.parse(e.data);
+    addFeed(a);
+    if (a.status === "pending") addCard(a);
+    scheduleRefresh();
+  });
+  es.addEventListener("decision", e => {
+    const a = JSON.parse(e.data);
+    removeCard(a.id);
+    addFeed(a);
+    scheduleRefresh();
+  });
+  es.addEventListener("policy", scheduleRefresh);
+}
+
+/* ---------- key gate ---------- */
+function showGate(err) {
+  $("#gate").classList.remove("hidden");
+  $("#gateErr").textContent = err || "";
+  $("#gateErr").classList.toggle("hidden", !err);
+  $("#gateName").value = state.name;
+  $("#gateKey").value = "";
+  $("#gateKey").focus();
+}
+$("#gateForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  state.key = $("#gateKey").value.trim();
+  state.name = $("#gateName").value.trim() || "human";
+  ls.set("mandate_key", state.key); ls.set("mandate_name", state.name);
+  $("#gate").classList.add("hidden");
+  loadAll().catch(() => {});
+});
+
+updateCount();
+connect();
+if (!state.key) showGate();
+</script>
+{% endraw %}
+</body>
+</html>

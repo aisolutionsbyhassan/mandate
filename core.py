@@ -1,8 +1,8 @@
 """Mandate core: SQLite, deterministic risk scoring, policy engine.
 
 Mandate never makes a judgment call. It routes: rules a human granted
-auto-approve, everything else escalates to a human.
-(The Groq explanation layer arrives in Phase 3, the learning engine in Phase 4.)
+auto-approve, everything else escalates to a human. The LLM only explains.
+(The learning engine arrives in Phase 4.)
 """
 import json
 import os
@@ -12,6 +12,13 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 DB_PATH = os.environ.get("MANDATE_DB", "mandate.db")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+EXPLAIN_PROMPT = (
+    "You explain to a human reviewer why an AI agent's action was flagged. You never recommend "
+    "approving or denying, and you never change the risk score. Use the concrete numbers given. "
+    'Return only JSON: {"reasons": [exactly 3 short strings, max 12 words each], '
+    '"impact_if_wrong": "one line, max 20 words, what happens if this goes through by mistake"}'
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS approvals (
@@ -127,9 +134,37 @@ def score_risk(action_type, payload, context):
     return {"score": min(100, score), "signals": signals, "floor": floor}
 
 
+def llm_explain(action_type, payload, context, reasoning, risk):
+    """Groq writes the reasons + impact line. 3s timeout; any failure returns the
+    deterministic fallback. It only explains — status and score never depend on it."""
+    fallback = explain(action_type, payload, context, risk)
+    key = os.environ.get("GROQ_API_KEY")
+    if not key:
+        return fallback
+    try:
+        from groq import Groq
+
+        client = Groq(api_key=key, timeout=3, max_retries=0)
+        resp = client.chat.completions.create(
+            model=GROQ_MODEL, temperature=0, max_tokens=400,
+            response_format={"type": "json_object"}, extra_body={"reasoning_effort": "low"},
+            messages=[{"role": "system", "content": EXPLAIN_PROMPT},
+                      {"role": "user", "content": json.dumps({
+                          "action_type": action_type, "payload": payload, "context": context,
+                          "agent_reasoning": reasoning, "risk_score": risk["score"],
+                          "signals": risk["signals"]})}])
+        data = json.loads(resp.choices[0].message.content)
+        reasons = [str(r).strip()[:140] for r in data["reasons"] if str(r).strip()][:3]
+        impact = str(data["impact_if_wrong"]).strip()[:200]
+        if len(reasons) < 2 or not impact:
+            return fallback
+        return {"reasons": reasons, "impact_if_wrong": impact}
+    except Exception:
+        return fallback
+
+
 def explain(action_type, payload, context, risk):
-    """Reasons + impact line. Fallback built from deterministic signals;
-    the Groq layer (Phase 3) will sit in front of this and fall back to it."""
+    """Reasons + impact line built only from the deterministic signals."""
     amount = _num((payload or {}).get("amount"))
     reasons = risk["signals"][:4] or ["No elevated risk signals found"]
     if action_type == "delete_account":
@@ -231,11 +266,17 @@ def create_approval(agent, action_type, payload, context, reasoning="", callback
     payload, context = payload or {}, context or {}
     risk = score_risk(action_type, payload, context)
     verdict, rule = evaluate(action_type, payload, context, risk)
-    expl = explain(action_type, payload, context, risk)
+    auto = verdict == "auto"
+    # Auto-approvals stay instant; the LLM only explains what a human will look at.
+    expl = (explain(action_type, payload, context, risk) if auto
+            else llm_explain(action_type, payload, context, reasoning, risk))
     reasons = expl["reasons"]
+    if risk["floor"] and not auto:
+        floor = next(s for s in risk["signals"] if s.startswith("Hard floor"))
+        if floor not in reasons:
+            reasons = [floor] + reasons[:3]
     if verdict == "escalate" and rule:
         reasons = [f"Policy: {rule['name']}"] + reasons[:3]
-    auto = verdict == "auto"
     now = _iso(_now())
     row = {
         "id": "apr_" + uuid.uuid4().hex[:8], "agent": agent, "action_type": action_type,

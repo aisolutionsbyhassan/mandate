@@ -1124,10 +1124,13 @@ document.addEventListener("click", async e => {
 });
 
 /* ---------- agents ---------- */
-const SOURCES = { python: "Python", langgraph: "LangGraph", n8n: "n8n", claude_code: "Claude Code",
-                  make: "Make", zapier: "Zapier", http: "cURL" };
-const SRC_COLOR = { python: "#3776AB", langgraph: "#0F766E", n8n: "#EA4B71", claude_code: "#D97757",
-                    make: "#6D28D9", zapier: "#FF4F00", http: "#475569" };
+const SOURCES = { python: "Custom · Python", http: "Custom · API", n8n: "n8n", claude_code: "Claude Code", cursor: "Cursor",
+                  langgraph: "LangGraph", make: "Make", zapier: "Zapier" };
+const SRC_COLOR = { python: "#3776AB", http: "#475569", n8n: "#EA4B71", claude_code: "#D97757", cursor: "#111827",
+                    langgraph: "#0F766E", make: "#6D28D9", zapier: "#FF4F00" };
+// the four ways to connect, as shown in the Connect wizard; "custom" covers the Python SDK and plain HTTP
+const WIZ_TABS = { custom: "Custom agent", n8n: "n8n", claude_code: "Claude Code", cursor: "Cursor" };
+const WIZ_MATCH = { custom: ["python", "http", "langgraph"], n8n: ["n8n"], claude_code: ["claude_code"], cursor: ["cursor"] };
 const srcChip = s => `<span class="src" style="color:${SRC_COLOR[s] || "#475569"}"><span class="dot"></span><span style="color:var(--ink-2)">${esc(SOURCES[s] || s)}</span></span>`;
 const ago = iso => {
   const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -1208,22 +1211,23 @@ function renderOverview() {
 }
 
 /* ---------- connect wizard ---------- */
-const wiz = { src: "python", reveal: false, open: false, connected: {} };
+const wiz = { src: "custom", reveal: false, open: false, connected: {} };
 
 function snippet(src, url, key) {
-  const body = (extra = "") => `{
+  const body = (source, extra = "") => `{
   "agent": "my-agent",
-  "source": "${src}",
+  "source": "${source}",
   "action_type": "issue_refund",
   "payload": { "order_id": "1201", "amount": 20 },
   "context": { "order_age_days": 5 },
   "reasoning": "Customer reported a damaged item"${extra}
 }`;
   const T = {
-    python: ["Install nothing extra: copy sdk.py from the Mandate repo next to your agent, then wrap any risky function.",
-`from sdk import Mandate
+    custom: ["Your own agent, any framework. In Python, drop in sdk.py from the Mandate repo and wrap any risky function. From any other language it is one HTTP call. RefundBot in the repo (agents/refundbot.py) is a full example.",
+`# Python — copy sdk.py next to your agent (only needs httpx)
+from sdk import Mandate
 
-mandate = Mandate("${url}", "${key}", agent_name="my-agent", source="python")
+mandate = Mandate("${url}", "${key}", agent_name="my-agent")
 
 @mandate.requires_approval(action_type="issue_refund")
 def issue_refund(order_id, amount, reason):
@@ -1231,29 +1235,26 @@ def issue_refund(order_id, amount, reason):
 
 # blocks until a rule or a human decides
 issue_refund(order_id="1201", amount=20, reason="damaged",
-             mandate_context={"order_age_days": 5})`],
-    langgraph: ["Same SDK. Wrap the function your LangGraph tool node calls, so the graph pauses inside the tool.",
-`from langchain_core.tools import tool
-from sdk import Mandate
+             mandate_context={"order_age_days": 5})
 
-mandate = Mandate("${url}", "${key}", agent_name="my-langgraph-agent", source="langgraph")
 
-@mandate.requires_approval(action_type="issue_refund")
-def _refund(order_id: str, amount: float, reason: str):
-    ...  # your real refund call
-
-@tool
-def issue_refund(order_id: str, amount: float, reason: str) -> str:
-    """Refund an order."""
-    _refund(order_id=order_id, amount=amount, reason=reason)
-    return "refunded"`],
-    n8n: ["Add an HTTP Request node, then a Wait node set to 'On webhook call'. Mandate calls the resume URL when a human decides.",
+# Any other language — POST, then poll GET /v1/approvals/{id}
+# (or add "callback_url" and Mandate will POST the decision to you)
+curl -X POST ${url}/v1/approvals \\
+  -H "x-mandate-key: ${key}" \\
+  -H "content-type: application/json" \\
+  -d '${body("http").replace(/\n\s*/g, " ")}'`],
+    n8n: ["Add an HTTP Request node, then a Wait node set to 'On Webhook Call'. Mandate calls the resume URL when a human decides, so the workflow continues by itself.",
 `HTTP Request node
   Method:   POST
   URL:      ${url}/v1/approvals
-  Header:   x-mandate-key: ${key}
+  Auth:     Generic Credential Type → Header Auth
+            name x-mandate-key · value ${key}
   Body (JSON):
-${body(',\n  "callback_url": "{{ $execution.resumeUrl }}"').replace(/^/gm, "    ")}
+${body("n8n", ',\n  "callback_url": "{{ $execution.resumeUrl }}"').replace(/^/gm, "    ")}
+
+IF node:  {{ $json.status }} equals auto_approved → run now
+          otherwise → Wait node
 
 Wait node
   Resume: On Webhook Call
@@ -1277,38 +1278,32 @@ curl -o .claude/hooks/mandate_hook.py ${url}/integrations/claude_code_hook.py
     }]
   }
 }`],
-    make: ["Scenario 1: HTTP > Make a request, pointing callback_url at a Custom webhook in a second scenario that continues the work.",
-`HTTP module: Make a request
-  URL:      ${url}/v1/approvals
-  Method:   POST
-  Headers:  x-mandate-key: ${key}
-  Body type: Raw / application/json
-${body(',\n  "callback_url": "<webhook URL of scenario 2>"').replace(/^/gm, "    ")}
+    cursor: ["Cursor's preToolUse hook sends every shell command, file write and delete to Mandate first. Read-only commands pass instantly; risky ones wait for you. Keep mandate.json out of git (it holds your key) and restart Cursor after adding it.",
+`# 1. in your project, download the hook (standard library only, no installs)
+mkdir -p .cursor/hooks
+curl -o .cursor/hooks/mandate_hook.py ${url}/integrations/cursor_hook.py
 
-Scenario 2: Custom webhook trigger
-  Receives { status, final_payload, decided_by }; branch on status.`],
-    zapier: ["Zap 1: Webhooks by Zapier > Custom Request. Zap 2 starts with Catch Hook and receives the decision.",
-`Webhooks by Zapier: Custom Request
-  Method:  POST
-  URL:     ${url}/v1/approvals
-  Headers: x-mandate-key: ${key}
-           Content-Type: application/json
-  Data:
-${body(',\n  "callback_url": "<Catch Hook URL of Zap 2>"').replace(/^/gm, "    ")}
+# 2. .cursor/hooks/mandate.json   (Cursor hooks can't set env vars)
+{ "url": "${url}", "api_key": "${key}" }
 
-Zap 2: Webhooks by Zapier > Catch Hook
-  Receives { status, final_payload, decided_by }.`],
-    http: ["Any language, any platform. POST, then poll GET /v1/approvals/{id} (or pass a callback_url).",
-`curl -X POST ${url}/v1/approvals \\
-  -H "x-mandate-key: ${key}" \\
-  -H "content-type: application/json" \\
-  -d '${body().replace(/\n\s*/g, " ")}'`],
+# 3. .cursor/hooks.json
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [{
+      "command": "python .cursor/hooks/mandate_hook.py",
+      "matcher": "Shell|Write|Delete",
+      "timeout": 600,
+      "failClosed": true
+    }]
+  }
+}`],
   };
   return T[src];
 }
 
 function renderWizard() {
-  $("#srcTabs").innerHTML = Object.entries(SOURCES).map(([k, v]) =>
+  $("#srcTabs").innerHTML = Object.entries(WIZ_TABS).map(([k, v]) =>
     `<button data-src="${k}" class="${k === wiz.src ? "active" : ""}">${v}</button>`).join("");
   const url = location.origin, realKey = state.agentKey || "YOUR_API_KEY";
   const shown = wiz.reveal ? realKey : "•".repeat(Math.min(realKey.length, 24));
@@ -1322,7 +1317,7 @@ function renderWizard() {
         <button class="btn small" data-w="copykey">Copy</button></div>
     </div></div>
     <div class="step"><div class="n">2</div><div>
-      <h4>Paste this into your ${esc(SOURCES[wiz.src])} agent</h4>
+      <h4>Set up ${esc(WIZ_TABS[wiz.src])}</h4>
       <p class="hint">${esc(hint)}</p>
       <div class="snippet"><pre class="code mono">${esc(code.replaceAll("{{KEY}}", wiz.reveal ? realKey : "<your-api-key>"))}</pre>
         <button class="btn small" data-w="copycode">Copy</button></div>
@@ -1348,9 +1343,10 @@ function closeWizard() { wiz.open = false; $("#wizard").classList.add("hidden");
 function wizardHit(a) {
   if (!wiz.open) return;
   const src = a.source || "http";
-  if (!wiz.connected[src]) {
-    wiz.connected[src] = a.agent;
-    if (src === wiz.src) renderWizard();
+  const tab = Object.keys(WIZ_MATCH).find(k => WIZ_MATCH[k].includes(src));
+  if (tab && !wiz.connected[tab]) {
+    wiz.connected[tab] = a.agent;
+    if (tab === wiz.src) renderWizard();
   }
 }
 

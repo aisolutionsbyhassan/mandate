@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 """
 
-SOURCES = ("python", "langgraph", "n8n", "claude_code", "make", "zapier", "http")
+SOURCES = ("python", "n8n", "claude_code", "cursor", "http", "langgraph", "make", "zapier")
 IRREVERSIBILITY = {"delete_account": 40, "issue_refund": 30, "email_customer": 10,
                    "run_command": 10, "write_file": 5}
 DECISIONS = {"approved": "approved", "approve": "approved", "denied": "denied",
@@ -929,24 +929,24 @@ def _seed():
         ("refundbot", "issue_refund", {"order_id": "1102", "amount": 180, "reason": "changed mind"},
          {"order_age_days": 40, "policy_limit_days": 30}, "Customer wants money back after 40 days.",
          "denied", "hamza", 2.9, 22, None),
-        ("n8n-support", "issue_refund", {"order_id": "1155", "amount": 320, "reason": "late delivery"},
+        ("n8n-billing", "issue_refund", {"vendor": "Acme Cloud Hosting", "amount": 320, "reason": "late delivery"},
          {"order_age_days": 20, "policy_limit_days": 30}, "Parcel arrived two weeks late.",
-         "edited", "hamza", 2.1, 31, {"order_id": "1155", "amount": 250, "reason": "late delivery"}),
+         "edited", "hamza", 2.1, 31, {"vendor": "Acme Cloud Hosting", "amount": 250, "reason": "late delivery"}),
         ("refundbot", "delete_account", {"user_id": "u_5530"},
          {}, "User asked to be removed.", "denied", "hamza", 1.4, 9, None),
-        ("make-invoicing", "issue_refund", {"order_id": "1210", "amount": 42, "reason": "duplicate charge"},
-         {"order_age_days": 2, "policy_limit_days": 30}, "Customer was billed twice.",
+        ("n8n-billing", "issue_refund", {"vendor": "Paper Co", "amount": 42, "reason": "duplicate charge"},
+         {"order_age_days": 2, "policy_limit_days": 30}, "Billing agent: vendor was charged twice.",
          "auto_approved", "rule", 1.0, 0, None),
-        ("zapier-leads", "email_customer", {"email": "team@acme.example", "subject": "Quick follow-up",
-                                            "body": "Hi, following up on your demo request."},
-         {"recipients": 1}, "Lead asked for a follow-up.", "approved", "hamza", 0.7, 11, None),
+        ("cursor-agent", "run_command", {"command": "npm run db:migrate"},
+         {}, "Apply the new orders table migration.", "approved", "hamza", 0.7, 11, None),
         ("claude-code", "run_command", {"command": "git push --force origin main"},
          {}, "Pushing the rebased branch.", "denied", "hamza", 0.4, 6, None),
+        ("cursor-agent", "run_command", {"command": "git diff --stat"},
+         {}, "Reviewing changes before committing.", "auto_approved", "rule", 0.35, 0, None),
         ("claude-code", "run_command", {"command": "git status"},
          {}, "Checking the working tree before committing.", "auto_approved", "rule", 0.3, 0, None),
     ]
-    seed_sources = {"refundbot": "python", "n8n-support": "n8n", "make-invoicing": "make",
-                    "zapier-leads": "zapier", "claude-code": "claude_code"}
+    seed_sources = {"refundbot": "python", "n8n-billing": "n8n", "cursor-agent": "cursor", "claude-code": "claude_code"}
     for agent, action, payload, ctx, why, status, by, hrs, lat, final in history:
         created = _now() - timedelta(hours=hrs)
         risk = score_risk(action, payload, ctx)
@@ -965,4 +965,4 @@ def _seed():
             "source": seed_sources.get(agent, "http"),
         })
     _exec("UPDATE rules SET times_used=3 WHERE id='small-refund-30d'")
-    _exec("UPDATE rules SET times_used=1 WHERE id='readonly-commands'")
+    _exec("UPDATE rules SET times_used=2 WHERE id='readonly-commands'")

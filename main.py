@@ -209,10 +209,15 @@ async def connect_info(who: dict = Depends(require_key)):
     return {"api_key": os.environ.get("MANDATE_API_KEY", "")}
 
 
-@app.get("/integrations/claude_code_hook.py", response_class=PlainTextResponse)
-def claude_code_hook():
-    """The hook script, so the Connect wizard can offer a one-line download. Contains no secrets."""
-    with open(os.path.join(BASE_DIR, "integrations", "claude_code_hook.py"), encoding="utf-8") as f:
+HOOK_FILES = {"claude_code_hook.py", "cursor_hook.py"}
+
+
+@app.get("/integrations/{name}", response_class=PlainTextResponse)
+def integration_file(name: str):
+    """Hook scripts, so the Connect wizard can offer a one-line download. They contain no secrets."""
+    if name not in HOOK_FILES:
+        raise HTTPException(404, "no such integration file")
+    with open(os.path.join(BASE_DIR, "integrations", name), encoding="utf-8") as f:
         return f.read()
 
 

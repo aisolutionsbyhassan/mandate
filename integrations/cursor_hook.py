@@ -33,6 +33,18 @@ KEY = os.environ.get("MANDATE_API_KEY") or _CFG.get("api_key") or ""
 AGENT = os.environ.get("MANDATE_AGENT") or _CFG.get("agent") or "cursor-agent"
 TIMEOUT = int(os.environ.get("MANDATE_TIMEOUT") or _CFG.get("timeout") or 300)
 PREVIEW = 1500
+# set "debug": true in mandate.json (or MANDATE_HOOK_DEBUG=1) to log every call to <temp>/mandate_cursor_hook.log
+DEBUG = bool(os.environ.get("MANDATE_HOOK_DEBUG") or _CFG.get("debug"))
+
+
+def _log(msg):
+    if DEBUG:
+        try:
+            import tempfile
+            with open(os.path.join(tempfile.gettempdir(), "mandate_cursor_hook.log"), "a", encoding="utf-8") as f:
+                f.write(time.strftime("%H:%M:%S ") + str(msg)[:2000] + "\n")
+        except OSError:
+            pass
 
 
 def _call(method, path, body=None):
@@ -68,12 +80,15 @@ def respond(permission, user_message, agent_message=None, updated=None):
     out = {"permission": permission, "user_message": user_message, "agent_message": agent_message or user_message}
     if updated is not None:
         out["updated_input"] = updated
+    _log("OUT " + json.dumps(out))
     print(json.dumps(out))
     sys.exit(0)
 
 
 def main():
-    event = json.load(sys.stdin)
+    raw = sys.stdin.buffer.read().decode("utf-8", "replace").lstrip("﻿")
+    _log(f"IN python={sys.executable} cwd={os.getcwd()} url={URL} key_set={bool(KEY)} stdin={raw}")
+    event = json.loads(raw)
     tool, inp = event.get("tool_name", ""), event.get("tool_input") or {}
     if isinstance(inp, str):
         try:
@@ -134,4 +149,5 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except Exception as e:  # fail closed: Cursor would otherwise run the tool
+        _log(f"ERROR {type(e).__name__}: {e}")
         respond("deny", f"Mandate hook error ({type(e).__name__}: {e}); the action was blocked.")

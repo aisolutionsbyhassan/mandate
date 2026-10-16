@@ -30,10 +30,11 @@ class ApprovalTimeout(Exception):
 
 class Mandate:
     def __init__(self, base_url=None, api_key=None, agent_name="agent",
-                 timeout_seconds=300, poll_interval=2):
+                 timeout_seconds=300, poll_interval=2, source="python"):
         self.base_url = (base_url or os.environ.get("MANDATE_URL", "http://localhost:8000")).rstrip("/")
         self.api_key = api_key or os.environ.get("MANDATE_API_KEY", "")
         self.agent_name = agent_name
+        self.source = source
         self.timeout_seconds = timeout_seconds
         self.poll_interval = poll_interval
         self.client = httpx.Client(base_url=self.base_url, timeout=10,
@@ -77,6 +78,7 @@ class Mandate:
         r = self.client.post("/v1/approvals", json={
             "agent": self.agent_name, "action_type": action_type, "payload": payload,
             "context": context, "reasoning": reasoning, "timeout_seconds": self.timeout_seconds,
+            "source": self.source,
         })
         r.raise_for_status()
         return r.json()

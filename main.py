@@ -80,6 +80,7 @@ class ApprovalIn(BaseModel):
     callback_url: Optional[str] = None
     timeout_seconds: int = Field(300, ge=1, le=86400)
     on_timeout: str = "deny"
+    source: Optional[str] = None
 
 
 class DecideIn(BaseModel):
@@ -106,7 +107,7 @@ async def create_approval(body: ApprovalIn):
     # run in a thread: the Groq explanation can take up to 3s and must not block SSE
     a = await run_in_threadpool(core.create_approval, body.agent, body.action_type, body.payload,
                                 body.context, body.reasoning, body.callback_url,
-                                body.timeout_seconds, body.on_timeout)
+                                body.timeout_seconds, body.on_timeout, None, body.source)
     publish("approval", a)
     return {"id": a["id"], "status": a["status"], "risk_score": a["risk_score"],
             "risk_reasons": a["risk_reasons"]}
@@ -124,6 +125,11 @@ async def get_approval(approval_id: str):
 @app.get("/v1/approvals", dependencies=[Depends(require_key)])
 async def list_approvals(status: Optional[str] = None, limit: int = Query(50, ge=1, le=200)):
     return core.list_approvals(status, limit)
+
+
+@app.get("/v1/agents", dependencies=[Depends(require_key)])
+async def get_agents():
+    return await run_in_threadpool(core.agents)
 
 
 @app.post("/v1/decide/{approval_id}", dependencies=[Depends(require_key)])

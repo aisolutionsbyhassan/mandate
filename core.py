@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS rules (
 );
 """
 
+SOURCES = ("python", "langgraph", "n8n", "claude_code", "make", "zapier", "http")
 IRREVERSIBILITY = {"delete_account": 40, "issue_refund": 30, "email_customer": 10}
 DECISIONS = {"approved": "approved", "approve": "approved", "denied": "denied",
              "deny": "denied", "edited": "edited", "edit": "edited"}
@@ -384,15 +385,18 @@ _SELECT = ("SELECT a.*, r.name AS rule_name FROM approvals a "
 def _insert_approval(a):
     _exec("""INSERT INTO approvals (id, agent, action_type, payload_json, context_json, reasoning,
              risk_score, risk_reasons_json, impact_if_wrong, status, decided_by, decided_at,
-             final_payload_json, rule_id, callback_url, timeout_seconds, on_timeout, created_at)
+             final_payload_json, rule_id, callback_url, timeout_seconds, on_timeout, created_at, source)
              VALUES (:id,:agent,:action_type,:payload_json,:context_json,:reasoning,:risk_score,
              :risk_reasons_json,:impact_if_wrong,:status,:decided_by,:decided_at,
-             :final_payload_json,:rule_id,:callback_url,:timeout_seconds,:on_timeout,:created_at)""", a)
+             :final_payload_json,:rule_id,:callback_url,:timeout_seconds,:on_timeout,:created_at,:source)""", a)
 
 
 def create_approval(agent, action_type, payload, context, reasoning="", callback_url=None,
-                    timeout_seconds=300, on_timeout="deny", created_at=None):
+                    timeout_seconds=300, on_timeout="deny", created_at=None, source=None):
     payload, context = payload or {}, context or {}
+    source = (source or "http").strip().lower()
+    if source not in SOURCES:
+        source = "http"
     risk = score_risk(action_type, payload, context)
     verdict, rule = evaluate(action_type, payload, context, risk)
     auto = verdict == "auto"
@@ -417,7 +421,7 @@ def create_approval(agent, action_type, payload, context, reasoning="", callback
         "final_payload_json": json.dumps(payload) if auto else None,
         "rule_id": rule["id"] if auto else None, "callback_url": callback_url,
         "timeout_seconds": timeout_seconds, "on_timeout": on_timeout,
-        "created_at": created_at or now,
+        "created_at": created_at or now, "source": source,
     }
     _insert_approval(row)
     if auto:
@@ -456,6 +460,26 @@ def list_approvals(status=None, limit=50):
     return [_present(r) for r in _query(sql, args + [limit])]
 
 
+def agents():
+    """Every agent that has called Mandate, derived from the approvals table."""
+    expire_stale()
+    out = {}
+    for r in _query("SELECT agent, source, status, created_at FROM approvals "
+                    "ORDER BY created_at DESC, rowid DESC"):
+        a = out.setdefault(r["agent"], {"name": r["agent"], "source": r["source"] or "http",
+                                        "actions": 0, "paused": 0, "last_seen": r["created_at"],
+                                        "_recent": []})
+        a["actions"] += 1
+        a["paused"] += r["status"] == "pending"
+        if len(a["_recent"]) < 50:
+            a["_recent"].append(r["status"] == "auto_approved")
+    for a in out.values():
+        recent = a.pop("_recent")
+        a["autonomy"] = round(100 * sum(recent) / len(recent))
+        a["status"] = "paused" if a["paused"] else "idle"
+    return sorted(out.values(), key=lambda a: a["last_seen"], reverse=True)
+
+
 def decide(approval_id, decision, final_payload=None, decided_by="human"):
     """Record a human decision. KeyError=missing, Conflict=not pending, ValueError=bad input."""
     status = DECISIONS.get((decision or "").lower())
@@ -485,6 +509,8 @@ def decide(approval_id, decision, final_payload=None, decided_by="human"):
 def init_db():
     with closing(_conn()) as c:
         c.executescript(SCHEMA)
+        if "source" not in [r["name"] for r in c.execute("PRAGMA table_info(approvals)")]:
+            c.execute("ALTER TABLE approvals ADD COLUMN source TEXT")  # Phase 6 migration
         c.commit()
     if not _query("SELECT 1 FROM rules LIMIT 1"):
         _seed()
@@ -528,7 +554,17 @@ def _seed():
          "edited", "hamza", 2.1, 31, {"order_id": "1155", "amount": 250, "reason": "late delivery"}),
         ("refundbot", "delete_account", {"user_id": "u_5530"},
          {}, "User asked to be removed.", "denied", "hamza", 1.4, 9, None),
+        ("make-invoicing", "issue_refund", {"order_id": "1210", "amount": 42, "reason": "duplicate charge"},
+         {"order_age_days": 2, "policy_limit_days": 30}, "Customer was billed twice.",
+         "auto_approved", "rule", 1.0, 0, None),
+        ("zapier-leads", "email_customer", {"email": "team@acme.example", "subject": "Quick follow-up",
+                                            "body": "Hi, following up on your demo request."},
+         {"recipients": 1}, "Lead asked for a follow-up.", "approved", "hamza", 0.7, 11, None),
+        ("claude-code", "run_command", {"command": "git push --force origin main"},
+         {}, "Pushing the rebased branch.", "denied", "hamza", 0.4, 6, None),
     ]
+    seed_sources = {"refundbot": "python", "n8n-support": "n8n", "make-invoicing": "make",
+                    "zapier-leads": "zapier", "claude-code": "claude_code"}
     for agent, action, payload, ctx, why, status, by, hrs, lat, final in history:
         created = _now() - timedelta(hours=hrs)
         risk = score_risk(action, payload, ctx)
@@ -543,5 +579,6 @@ def _seed():
             "final_payload_json": json.dumps(final or payload) if status in ("approved", "edited", "auto_approved") else None,
             "rule_id": "small-refund-30d" if auto else None, "callback_url": None,
             "timeout_seconds": 300, "on_timeout": "deny", "created_at": _iso(created),
+            "source": seed_sources.get(agent, "http"),
         })
-    _exec("UPDATE rules SET times_used=2 WHERE id='small-refund-30d'")
+    _exec("UPDATE rules SET times_used=3 WHERE id='small-refund-30d'")

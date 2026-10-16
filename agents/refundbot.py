@@ -36,7 +36,7 @@ SCENARIOS = {
                       "right now or I'm going to the press."),
 }
 
-mandate = Mandate(agent_name="refundbot")
+mandate = Mandate(agent_name="refundbot", source="python")
 
 
 @mandate.requires_approval(action_type="issue_refund")

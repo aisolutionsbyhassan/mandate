@@ -182,6 +182,48 @@
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   td .old { color: var(--faint); text-decoration: line-through; margin-right: 6px; }
 
+  /* agents */
+  .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .agent { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px; animation: enter .35s ease-out; }
+  .agent.paused { border-color: var(--red); animation: enter .35s ease-out, paused 1.6s ease-in-out infinite; }
+  .agent-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+  .agent .name { font-weight: 700; font-size: 17px; overflow-wrap: anywhere; }
+  .agent .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .agent .stats dt { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .agent .stats dd { margin: 2px 0 0; font-size: 20px; font-weight: 700; }
+  .agent .stats dd.sm { font-size: 14px; font-weight: 600; padding-top: 5px; }
+  .agent .track { height: 6px; margin-top: 6px; }
+  .pill.src { color: var(--accent); border-color: rgba(139,157,255,.45); }
+  .pill.paused { color: var(--red); border-color: var(--red); background: rgba(248,113,113,.08); }
+  .pill.idle { color: var(--muted); }
+  .head-actions { display: flex; gap: 10px; align-items: center; }
+
+  /* connect wizard */
+  .modal { position: fixed; inset: 0; z-index: 40; background: rgba(5,6,8,.78); backdrop-filter: blur(6px); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
+  .wizard { width: 100%; max-width: 760px; background: var(--panel); border: 1px solid var(--border-2); border-radius: 18px; padding: 28px 30px; }
+  .wizard-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .wizard h3 { margin: 0; font-size: 22px; }
+  .wizard > p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+  .x { background: none; border: 0; color: var(--muted); font-size: 24px; cursor: pointer; line-height: 1; padding: 4px 8px; }
+  .x:hover { color: var(--text); }
+  .srctabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 24px; }
+  .srctabs button { background: none; border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px; color: var(--muted); cursor: pointer; font-size: 13px; }
+  .srctabs button:hover { color: var(--text); }
+  .srctabs button.active { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); font-weight: 650; }
+  .step { display: grid; grid-template-columns: 28px 1fr; gap: 14px; margin-bottom: 22px; }
+  .step .n { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border-2); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: var(--muted); }
+  .step h4 { margin: 3px 0 8px; font-size: 15px; }
+  .step .hint { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+  .keyrow, .coderow { display: flex; gap: 8px; align-items: stretch; }
+  .keyrow code { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--border-2); border-radius: 8px; padding: 9px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+  pre.code { position: relative; margin: 0; background: var(--bg); border: 1px solid var(--border-2); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 12.5px; line-height: 1.55; color: #c9ced6; }
+  .snippet { position: relative; }
+  .snippet .btn { position: absolute; top: 8px; right: 8px; padding: 4px 10px; font-size: 12px; background: var(--panel-2); }
+  .waitbox { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border: 1px dashed var(--border-2); border-radius: 10px; color: var(--muted); font-size: 14px; }
+  .waitbox i { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); animation: blink 1s infinite; flex: none; }
+  .waitbox.ok { border: 1px solid rgba(52,211,153,.5); background: rgba(52,211,153,.07); color: var(--green); font-weight: 600; animation: enter .35s ease-out; }
+  .waitbox.ok i { display: none; }
+
   /* key gate */
   .gate { position: fixed; inset: 0; z-index: 50; background: rgba(5,6,8,.78); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; padding: 16px; }
   .gate form { width: 100%; max-width: 400px; background: var(--panel); border: 1px solid var(--border-2); border-radius: 18px; padding: 30px; }
@@ -219,6 +261,7 @@
     <div class="brand">MANDATE</div>
     <nav>
       <button data-tab="inbox" class="active">Inbox <span class="count hidden" id="navCount">0</span></button>
+      <button data-tab="agents">Agents</button>
       <button data-tab="policies">Policies <span class="count accent hidden" id="navProps">0</span></button>
       <button data-tab="history">History</button>
     </nav>
@@ -251,6 +294,16 @@
     </div>
   </section>
 
+  <section class="tab" id="tab-agents">
+    <div class="col-head"><h2>Agents connected to Mandate</h2>
+      <div class="head-actions"><button class="btn primary" id="connectBtn">Connect an agent</button></div></div>
+    <div class="agents-grid" id="agents"></div>
+    <div class="empty hidden" id="emptyAgents">
+      <strong>No agents yet</strong>
+      Connect your first agent. It takes one copy-paste.
+    </div>
+  </section>
+
   <section class="tab" id="tab-policies">
     <div class="hero">
       <div class="num"><span id="pctBig">0</span><small>%</small></div>
@@ -280,6 +333,15 @@
     </div>
   </section>
 </main>
+
+<div class="modal hidden" id="wizard">
+  <div class="wizard">
+    <div class="wizard-head"><h3>Connect an agent</h3><button class="x" id="wizClose" aria-label="Close">×</button></div>
+    <p>Pick where your agent runs. It will ask Mandate before any risky action and wait for a decision.</p>
+    <div class="srctabs" id="srcTabs"></div>
+    <div id="wizBody"></div>
+  </div>
+</div>
 
 <div class="gate hidden" id="gate">
   <form id="gateForm" autocomplete="off">
@@ -461,6 +523,7 @@ function tick() {
   document.querySelectorAll("[data-since]").forEach(el => {
     el.textContent = mmss(Math.max(0, (now - Date.parse(el.dataset.since)) / 1000));
   });
+  document.querySelectorAll("[data-ago]").forEach(el => { el.textContent = ago(el.dataset.ago); });
 }
 setInterval(tick, 1000);
 
@@ -544,6 +607,190 @@ document.addEventListener("click", async e => {
   catch (err) { e.target.disabled = false; if (err.message !== "auth") toast(err.message); }
 });
 
+/* ---------- agents ---------- */
+const SOURCES = { python: "Python", langgraph: "LangGraph", n8n: "n8n", claude_code: "Claude Code",
+                  make: "Make", zapier: "Zapier", http: "cURL" };
+const ago = iso => {
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  return s < 10 ? "just now" : s < 60 ? Math.floor(s) + "s ago" : s < 3600 ? Math.floor(s / 60) + "m ago"
+    : s < 86400 ? Math.floor(s / 3600) + "h ago" : Math.floor(s / 86400) + "d ago";
+};
+
+async function loadAgents() {
+  const list = await api("/v1/agents");
+  $("#emptyAgents").classList.toggle("hidden", list.length > 0);
+  $("#agents").innerHTML = list.map(a => `
+    <article class="agent ${a.status === "paused" ? "paused" : ""}">
+      <div class="agent-top">
+        <span class="name">${esc(a.name)}</span>
+        <span class="pill src">${esc(SOURCES[a.source] || a.source)}</span>
+      </div>
+      <dl class="stats">
+        <div><dt>Actions</dt><dd>${a.actions}</dd></div>
+        <div><dt>Status</dt><dd class="sm"><span class="pill ${a.status}">${a.status === "paused" ? `paused · ${a.paused}` : "idle"}</span></dd></div>
+        <div><dt>Autonomy</dt><dd>${a.autonomy}%</dd><div class="track"><div class="fill" style="width:${a.autonomy}%"></div></div></div>
+        <div><dt>Last seen</dt><dd class="sm" data-ago="${esc(a.last_seen)}">${ago(a.last_seen)}</dd></div>
+      </dl>
+    </article>`).join("");
+}
+
+/* ---------- connect wizard ---------- */
+const wiz = { src: "python", reveal: false, open: false, connected: {} };
+
+function snippet(src, url, key) {
+  const body = (extra = "") => `{
+  "agent": "my-agent",
+  "source": "${src}",
+  "action_type": "issue_refund",
+  "payload": { "order_id": "1201", "amount": 20 },
+  "context": { "order_age_days": 5 },
+  "reasoning": "Customer reported a damaged item"${extra}
+}`;
+  const T = {
+    python: ["Install nothing extra: copy sdk.py from the Mandate repo next to your agent, then wrap any risky function.",
+`from sdk import Mandate
+
+mandate = Mandate("${url}", "${key}", agent_name="my-agent", source="python")
+
+@mandate.requires_approval(action_type="issue_refund")
+def issue_refund(order_id, amount, reason):
+    print(f"Refunded {amount} on {order_id}")
+
+# blocks until a rule or a human decides
+issue_refund(order_id="1201", amount=20, reason="damaged",
+             mandate_context={"order_age_days": 5})`],
+    langgraph: ["Same SDK. Wrap the function your LangGraph tool node calls, so the graph pauses inside the tool.",
+`from langchain_core.tools import tool
+from sdk import Mandate
+
+mandate = Mandate("${url}", "${key}", agent_name="my-langgraph-agent", source="langgraph")
+
+@mandate.requires_approval(action_type="issue_refund")
+def _refund(order_id: str, amount: float, reason: str):
+    ...  # your real refund call
+
+@tool
+def issue_refund(order_id: str, amount: float, reason: str) -> str:
+    """Refund an order."""
+    _refund(order_id=order_id, amount=amount, reason=reason)
+    return "refunded"`],
+    n8n: ["Add an HTTP Request node, then a Wait node set to 'On webhook call'. Mandate calls the resume URL when a human decides.",
+`HTTP Request node
+  Method:   POST
+  URL:      ${url}/v1/approvals
+  Header:   x-mandate-key: ${key}
+  Body (JSON):
+${body(',\n  "callback_url": "{{ $execution.resumeUrl }}"').replace(/^/gm, "    ")}
+
+Wait node
+  Resume: On Webhook Call
+  The decision arrives as { status, final_payload, decided_by }.`],
+    claude_code: ["A PreToolUse hook sends Bash / Write / Edit calls to Mandate. The hook script ships in Phase 7; this is the settings.json it will use.",
+`// .claude/settings.json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Bash|Write|Edit",
+      "hooks": [{ "type": "command",
+                  "command": "python integrations/claude_code_hook.py" }]
+    }]
+  }
+}
+
+# environment for the hook
+export MANDATE_URL=${url}
+export MANDATE_API_KEY=${key}`],
+    make: ["Scenario 1: HTTP > Make a request, pointing callback_url at a Custom webhook in a second scenario that continues the work.",
+`HTTP module: Make a request
+  URL:      ${url}/v1/approvals
+  Method:   POST
+  Headers:  x-mandate-key: ${key}
+  Body type: Raw / application/json
+${body(',\n  "callback_url": "<webhook URL of scenario 2>"').replace(/^/gm, "    ")}
+
+Scenario 2: Custom webhook trigger
+  Receives { status, final_payload, decided_by }; branch on status.`],
+    zapier: ["Zap 1: Webhooks by Zapier > Custom Request. Zap 2 starts with Catch Hook and receives the decision.",
+`Webhooks by Zapier: Custom Request
+  Method:  POST
+  URL:     ${url}/v1/approvals
+  Headers: x-mandate-key: ${key}
+           Content-Type: application/json
+  Data:
+${body(',\n  "callback_url": "<Catch Hook URL of Zap 2>"').replace(/^/gm, "    ")}
+
+Zap 2: Webhooks by Zapier > Catch Hook
+  Receives { status, final_payload, decided_by }.`],
+    http: ["Any language, any platform. POST, then poll GET /v1/approvals/{id} (or pass a callback_url).",
+`curl -X POST ${url}/v1/approvals \\
+  -H "x-mandate-key: ${key}" \\
+  -H "content-type: application/json" \\
+  -d '${body().replace(/\n\s*/g, " ")}'`],
+  };
+  return T[src];
+}
+
+function renderWizard() {
+  $("#srcTabs").innerHTML = Object.entries(SOURCES).map(([k, v]) =>
+    `<button data-src="${k}" class="${k === wiz.src ? "active" : ""}">${v}</button>`).join("");
+  const url = location.origin, realKey = state.key || "YOUR_API_KEY";
+  const shown = wiz.reveal ? realKey : "•".repeat(Math.min(realKey.length, 24));
+  const [hint, code] = snippet(wiz.src, url, "{{KEY}}");
+  const done = wiz.connected[wiz.src];
+  $("#wizBody").innerHTML = `
+    <div class="step"><div class="n">1</div><div>
+      <h4>Your API key</h4>
+      <div class="keyrow"><code class="mono">${esc(shown)}</code>
+        <button class="btn small" data-w="reveal">${wiz.reveal ? "Hide" : "Show"}</button>
+        <button class="btn small" data-w="copykey">Copy</button></div>
+    </div></div>
+    <div class="step"><div class="n">2</div><div>
+      <h4>Paste this into your ${esc(SOURCES[wiz.src])} agent</h4>
+      <p class="hint">${esc(hint)}</p>
+      <div class="snippet"><pre class="code mono">${esc(code.replaceAll("{{KEY}}", wiz.reveal ? realKey : "<your-api-key>"))}</pre>
+        <button class="btn small" data-w="copycode">Copy</button></div>
+    </div></div>
+    <div class="step"><div class="n">3</div><div>
+      <h4>Run it once</h4>
+      <div class="waitbox ${done ? "ok" : ""}" id="waitbox">${done
+        ? `<span>✓ Connected — first call from <b>${esc(done)}</b> arrived</span>`
+        : `<i></i><span>Waiting for first call…</span>`}</div>
+    </div></div>`;
+  wiz.code = code.replaceAll("{{KEY}}", realKey);
+}
+
+function openWizard() { wiz.open = true; wiz.connected = {}; wiz.reveal = false; $("#wizard").classList.remove("hidden"); renderWizard(); }
+function closeWizard() { wiz.open = false; $("#wizard").classList.add("hidden"); }
+
+function wizardHit(a) {
+  if (!wiz.open) return;
+  const src = a.source || "http";
+  if (!wiz.connected[src]) {
+    wiz.connected[src] = a.agent;
+    if (src === wiz.src) renderWizard();
+  }
+}
+
+async function copyText(text, btn) {
+  try { await navigator.clipboard.writeText(text); } catch {
+    const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select();
+    try { document.execCommand("copy"); } catch {} t.remove();
+  }
+  const old = btn.textContent; btn.textContent = "Copied ✓"; setTimeout(() => btn.textContent = old, 1400);
+}
+
+$("#connectBtn").addEventListener("click", openWizard);
+$("#wizClose").addEventListener("click", closeWizard);
+$("#wizard").addEventListener("click", e => {
+  if (e.target.id === "wizard") return closeWizard();
+  if (e.target.dataset.src) { wiz.src = e.target.dataset.src; return renderWizard(); }
+  const w = e.target.dataset.w;
+  if (w === "reveal") { wiz.reveal = !wiz.reveal; renderWizard(); }
+  if (w === "copykey") copyText(state.key, e.target);
+  if (w === "copycode") copyText(wiz.code, e.target);
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && wiz.open) closeWizard(); });
+
 /* ---------- history ---------- */
 const decisionLabel = { auto_approved: "auto-approved", timed_out: "timed out" };
 
@@ -583,13 +830,13 @@ async function loadAll() {
   rows.slice(0, 30).map(a => [feedItem(a).t, a]).sort((x, y) => Date.parse(x[0]) - Date.parse(y[0]))
     .forEach(([, a]) => addFeed(a, false));
   updateCount();
-  await loadPolicies();
+  await Promise.all([loadPolicies(), loadAgents()]);
 }
 
 let refreshTimer;
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(() => { loadPolicies().catch(() => {}); loadHistory().catch(() => {}); }, 300);
+  refreshTimer = setTimeout(() => { loadPolicies().catch(() => {}); loadHistory().catch(() => {}); loadAgents().catch(() => {}); }, 300);
 }
 
 function connect() {
@@ -600,6 +847,7 @@ function connect() {
   es.addEventListener("approval", e => {
     const a = JSON.parse(e.data);
     addFeed(a);
+    wizardHit(a);
     if (a.status === "pending") addCard(a);
     scheduleRefresh();
   });

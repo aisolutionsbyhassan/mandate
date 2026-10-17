@@ -241,7 +241,8 @@ def llm_explain(action_type, payload, context, reasoning, risk):
         if len(reasons) < 2 or not impact:
             return fallback
         return {"reasons": reasons, "impact_if_wrong": impact}
-    except Exception:
+    except Exception as e:
+        print(f"[groq] explain fell back: {type(e).__name__}: {str(e)[:200]}", flush=True)
         return fallback
 
 

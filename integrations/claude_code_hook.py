@@ -32,7 +32,8 @@ PREVIEW = 1500
 def _call(method, path, body=None):
     req = urllib.request.Request(URL + path, method=method,
                                  data=json.dumps(body).encode() if body is not None else None,
-                                 headers={"x-mandate-key": KEY, "content-type": "application/json"})
+                                 headers={"x-mandate-key": KEY, "content-type": "application/json",
+                                          "user-agent": "mandate-hook/1.0"})
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read())
 

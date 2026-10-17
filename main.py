@@ -71,6 +71,7 @@ async def lifespan(_app):
 app = FastAPI(title="Mandate", lifespan=lifespan)
 
 
+REQUIRE_INVITE = os.environ.get("MANDATE_REQUIRE_INVITE") == "1"
 SESSION_COOKIE = "mandate_session"
 SESSION_TTL = 7 * 24 * 3600
 
@@ -141,7 +142,7 @@ class SignupIn(BaseModel):
     username: str
     name: str
     password: str
-    invite_code: str
+    invite_code: str = ""
 
 
 class LoginIn(BaseModel):
@@ -171,8 +172,9 @@ def index(request: Request):
 
 @app.post("/auth/signup")
 async def signup(body: SignupIn, request: Request, response: Response):
-    """Creating an account needs the workspace invite code (shown to signed-in people)."""
-    if not _secret() or not hmac.compare_digest(body.invite_code.strip().upper().encode(), invite_code().encode()):
+    """Signup is open by default. MANDATE_REQUIRE_INVITE=1 makes it need the workspace invite code."""
+    if REQUIRE_INVITE and (not _secret() or not hmac.compare_digest(
+            body.invite_code.strip().upper().encode(), invite_code().encode())):
         raise HTTPException(403, "that invite code is not valid")
     try:
         user = await run_in_threadpool(core.create_user, body.username, body.name, body.password)
@@ -191,6 +193,14 @@ async def login(body: LoginIn, request: Request, response: Response):
         raise HTTPException(401, "wrong username or password")
     _set_session(response, request, user["username"])
     return user
+
+
+@app.get("/auth/config")
+async def auth_config():
+    """What the sign-in page needs before anyone is signed in. The demo login is public on purpose."""
+    demo = core.demo_login()
+    return {"require_invite": REQUIRE_INVITE,
+            "demo": {"username": demo[0], "password": demo[1]} if demo else None}
 
 
 @app.post("/auth/logout")
@@ -396,8 +406,11 @@ async def grant_policy(rule_id: str):
     return rule
 
 
-@app.post("/demo/reset", dependencies=[Depends(require_key)])
-async def demo_reset():
+@app.post("/demo/reset")
+async def demo_reset(who: dict = Depends(require_key)):
+    demo = core.demo_login()
+    if who["kind"] == "user" and demo and who["user"]["username"] == demo[0]:
+        raise HTTPException(403, "the shared demo account cannot reset the workspace")
     core.reset_db()
     publish("reset", {})
     return {"status": "reset"}

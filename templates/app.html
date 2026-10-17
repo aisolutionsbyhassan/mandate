@@ -84,6 +84,9 @@
   .topbar .titles { flex: 1; min-width: 0; }
   .topbar h1 { margin: 0; font-size: 20px; font-weight: 700; }
   .topbar .sub { color: var(--muted); font-size: 13px; margin-top: 1px; }
+  .demo-hint { background: #EEF5FF; border: 1px solid #CFE0FA; border-radius: 12px; padding: 12px 14px; font-size: 13px; color: var(--ink-2); display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+  .demo-hint .creds { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .demo-hint code { font-family: "JetBrains Mono", monospace; font-size: 12px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
   .acct { position: relative; }
   .acct-menu { position: absolute; right: 0; top: calc(100% + 8px); width: 270px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px; z-index: 50; box-shadow: 0 20px 40px -16px rgba(10,24,48,.35); display: flex; flex-direction: column; gap: 12px; }
   .acct-menu .who { display: flex; flex-direction: column; font-size: 14px; color: var(--ink); }
@@ -769,10 +772,14 @@
     <h3 id="gateTitle">Welcome back</h3>
     <p id="gateSub">Sign in to approve, deny and edit what your agents want to do.</p>
     <div class="err hidden" id="gateErr"></div>
+    <div class="demo-hint hidden" id="demoHint">
+      <div><b>Evaluating Mandate?</b> Sign in with the shared demo account, no sign-up needed.</div>
+      <div class="creds"><code id="demoCreds"></code><button type="button" class="btn primary" id="demoBtn">Use demo account</button></div>
+    </div>
     <label class="su hidden">Full name <input type="text" id="gateName" autocomplete="name" placeholder="Your full name"></label>
     <label>Username <input type="text" id="gateUser" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
     <label>Password <input type="password" id="gatePass" autocomplete="current-password" required></label>
-    <label class="su hidden">Invite code <input type="text" id="gateKey" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="MND-XXXX-XXXX-XXXX"></label>
+    <label class="su hidden" id="gateKeyWrap">Invite code <input type="text" id="gateKey" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="MND-XXXX-XXXX-XXXX"></label>
     <button class="btn primary" type="submit" id="gateBtn">Sign in</button>
     <div class="note" id="gateNote">Agents connect with the API key. People sign in, so every decision shows who made it.</div>
   </form>
@@ -1729,10 +1736,27 @@ $("#resetBtn").addEventListener("click", async e => {
 
 /* ---------- accounts: sign in / create account / sign out ---------- */
 let gateMode = "login";
+let cfg = { require_invite: false, demo: null };
+const isDemoUser = () => !!(state.user && cfg.demo && state.user.username === cfg.demo.username);
+async function loadAuthConfig() {
+  try { const r = await fetch("/auth/config"); if (r.ok) cfg = await r.json(); } catch {}
+  const d = cfg.demo;
+  $("#demoHint").classList.toggle("hidden", !d);
+  if (d) $("#demoCreds").textContent = `${d.username} / ${d.password}`;
+  setGateMode(gateMode);
+}
+$("#demoBtn").addEventListener("click", () => {
+  if (!cfg.demo) return;
+  setGateMode("login");
+  $("#gateUser").value = cfg.demo.username; $("#gatePass").value = cfg.demo.password;
+  $("#gateForm").requestSubmit();
+});
 function renderUser() {
   const name = state.user ? state.user.name : "";
   $("#userName").textContent = name || "Signed out";
   $("#userAv").textContent = (name || "?").trim().slice(0, 1);
+  $("#resetBtn").classList.toggle("hidden", isDemoUser());
+  $("#acctMenu .inv").classList.toggle("hidden", !cfg.require_invite);
   $("#acctName").textContent = name; $("#acctUser").textContent = state.user ? "@" + state.user.username : "";
 }
 function setGateMode(mode) {
@@ -1740,12 +1764,14 @@ function setGateMode(mode) {
   const su = mode === "signup";
   document.querySelectorAll("#gateModes button").forEach(b => b.classList.toggle("active", b.dataset.mode === mode));
   document.querySelectorAll(".gate .su").forEach(el => el.classList.toggle("hidden", !su));
+  $("#gateKeyWrap").classList.toggle("hidden", !(su && cfg.require_invite));
   $("#gateTitle").textContent = su ? "Create your account" : "Welcome back";
-  $("#gateSub").textContent = su ? "Join this Mandate workspace. Ask a teammate for the invite code (it is in their account menu); after that you sign in with your password."
+  $("#gateSub").textContent = su ? (cfg.require_invite ? "Join this Mandate workspace. Ask a teammate for the invite code (it is in their account menu); after that you sign in with your password."
+                                                      : "Create an account to approve, deny and edit what the agents in this workspace want to do.")
                                  : "Sign in to approve, deny and edit what your agents want to do.";
   $("#gateBtn").textContent = su ? "Create account" : "Sign in";
   $("#gatePass").autocomplete = su ? "new-password" : "current-password";
-  $("#gateName").required = $("#gateKey").required = su;
+  $("#gateName").required = su; $("#gateKey").required = su && cfg.require_invite;
   $("#gateErr").classList.add("hidden");
 }
 function showGate(err) {
@@ -1799,6 +1825,7 @@ $("#acctOut").addEventListener("click", async () => {
 });
 
 async function boot() {
+  await loadAuthConfig();
   try {
     const r = await fetch("/auth/me", { credentials: "same-origin" });
     if (r.ok) { state.user = await r.json(); renderUser(); loadAll().catch(() => {}); return; }

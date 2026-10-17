@@ -866,13 +866,21 @@ def verify_user(username, password):
 
 
 def bootstrap_admin():
-    """Optional: create the first account from env, since SQLite resets on every redeploy."""
-    u, p = os.environ.get("MANDATE_ADMIN_USER"), os.environ.get("MANDATE_ADMIN_PASSWORD")
-    if u and p and not get_user(u):
-        try:
-            create_user(u, os.environ.get("MANDATE_ADMIN_NAME") or u, p)
-        except (ValueError, Conflict):
-            pass
+    """Optional: create accounts from env, since SQLite resets on every redeploy.
+    MANDATE_ADMIN_* is the owner; MANDATE_DEMO_* is a shared login for evaluators."""
+    for prefix, default_name in (("MANDATE_ADMIN", None), ("MANDATE_DEMO", "Demo Evaluator")):
+        u, p = os.environ.get(prefix + "_USER"), os.environ.get(prefix + "_PASSWORD")
+        if u and p and not get_user(u):
+            try:
+                create_user(u, os.environ.get(prefix + "_NAME") or default_name or u, p)
+            except (ValueError, Conflict):
+                pass
+
+
+def demo_login():
+    """(username, password) of the shared evaluator account, or None."""
+    u, p = os.environ.get("MANDATE_DEMO_USER"), os.environ.get("MANDATE_DEMO_PASSWORD")
+    return (u.strip().lower(), p) if u and p else None
 
 
 # ---------------------------------------------------------------- boot + seed

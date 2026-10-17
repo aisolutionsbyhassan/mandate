@@ -959,7 +959,7 @@ def _seed():
         expl = explain(action, payload, ctx, risk)
         auto = status == "auto_approved"
         _insert_approval({
-            "id": "apr_" + uuid.uuid4().hex[:8], "agent": agent, "action_type": action,
+            "id": "apr_seed" + uuid.uuid4().hex[:4], "agent": agent, "action_type": action,
             "payload_json": json.dumps(payload), "context_json": json.dumps(ctx), "reasoning": why,
             "risk_score": risk["score"], "risk_reasons_json": json.dumps(expl["reasons"]),
             "impact_if_wrong": expl["impact_if_wrong"], "status": status, "decided_by": by,

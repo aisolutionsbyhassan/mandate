@@ -84,6 +84,14 @@
   .topbar .titles { flex: 1; min-width: 0; }
   .topbar h1 { margin: 0; font-size: 20px; font-weight: 700; }
   .topbar .sub { color: var(--muted); font-size: 13px; margin-top: 1px; }
+  .acct { position: relative; }
+  .acct-menu { position: absolute; right: 0; top: calc(100% + 8px); width: 270px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px; z-index: 50; box-shadow: 0 20px 40px -16px rgba(10,24,48,.35); display: flex; flex-direction: column; gap: 12px; }
+  .acct-menu .who { display: flex; flex-direction: column; font-size: 14px; color: var(--ink); }
+  .acct-menu .who span { font-size: 12px; color: var(--ink-2); }
+  .acct-menu .inv label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); }
+  .acct-menu .invrow { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  .acct-menu code { flex: 1; font-family: "JetBrains Mono", monospace; font-size: 12px; background: #F3F6FB; border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
+  .tag.t-sample { background: #EEF2F8; color: #6B7A90; font-size: 10px; padding: 1px 6px; margin-left: 6px; }
   .user-chip { display: flex; align-items: center; gap: 9px; padding: 5px 12px 5px 5px; border: 1px solid var(--line); border-radius: 999px; background: #fff; cursor: pointer; font-size: 13px; color: var(--ink-2); font-weight: 500; }
   .user-chip:hover { border-color: var(--line-2); }
   .user-chip .av { width: 28px; height: 28px; border-radius: 50%; background: var(--grad); color: #fff; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center; text-transform: uppercase; }
@@ -562,7 +570,15 @@
     <header class="topbar">
       <div class="titles"><h1 id="viewTitle">Overview</h1><div class="sub" id="viewSub"></div></div>
       <button class="btn small" id="topConnect"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>Connect an agent</button>
-      <div class="user-chip" id="userChip" title="Signed in. Click to switch key or name"><span class="av" id="userAv">H</span><span id="userName">hamza</span></div>
+      <div class="acct">
+        <div class="user-chip" id="userChip" title="Account menu"><span class="av" id="userAv">H</span><span id="userName">Signed out</span></div>
+        <div class="acct-menu hidden" id="acctMenu">
+          <div class="who"><b id="acctName"></b><span id="acctUser"></span></div>
+          <div class="inv"><label>Invite code for teammates</label>
+            <div class="invrow"><code id="acctInvite">...</code><button class="btn" id="acctCopy" type="button">Copy</button></div></div>
+          <button class="btn" id="acctOut" type="button">Sign out</button>
+        </div>
+      </div>
     </header>
 
     <div class="banner hidden" id="pauseBanner">
@@ -753,10 +769,10 @@
     <h3 id="gateTitle">Welcome back</h3>
     <p id="gateSub">Sign in to approve, deny and edit what your agents want to do.</p>
     <div class="err hidden" id="gateErr"></div>
-    <label class="su hidden">Full name <input type="text" id="gateName" autocomplete="name" placeholder="Hamza Mughal"></label>
+    <label class="su hidden">Full name <input type="text" id="gateName" autocomplete="name" placeholder="Your full name"></label>
     <label>Username <input type="text" id="gateUser" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
     <label>Password <input type="password" id="gatePass" autocomplete="current-password" required></label>
-    <label class="su hidden">Workspace key <input type="password" id="gateKey" autocomplete="off" placeholder="the MANDATE_API_KEY of this server"></label>
+    <label class="su hidden">Invite code <input type="text" id="gateKey" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="MND-XXXX-XXXX-XXXX"></label>
     <button class="btn primary" type="submit" id="gateBtn">Sign in</button>
     <div class="note" id="gateNote">Agents connect with the API key. People sign in, so every decision shows who made it.</div>
   </form>
@@ -1639,7 +1655,7 @@ async function loadHistory() {
       : a.decided_at ? ((Date.parse(a.decided_at) - Date.parse(a.created_at)) / 1000).toFixed(0) + "s" : "—";
     return `<tr>
       <td class="mono">${clock(a.created_at)}</td>
-      <td class="agent-cell">${esc(a.agent)}</td>
+      <td class="agent-cell">${esc(a.agent)}${a.id.startsWith("apr_seed") ? ' <span class="tag t-sample" title="Sample history that ships with the demo">sample</span>' : ""}</td>
       <td>${esc(human(a.action_type))}</td>
       <td class="num">${amount}</td>
       <td><span class="tag t-${a.status}">${esc(decisionLabel[a.status] || a.status)}</span></td>
@@ -1717,7 +1733,7 @@ function renderUser() {
   const name = state.user ? state.user.name : "";
   $("#userName").textContent = name || "Signed out";
   $("#userAv").textContent = (name || "?").trim().slice(0, 1);
-  $("#userChip").title = state.user ? `Signed in as @${state.user.username}. Click to sign out.` : "";
+  $("#acctName").textContent = name; $("#acctUser").textContent = state.user ? "@" + state.user.username : "";
 }
 function setGateMode(mode) {
   gateMode = mode;
@@ -1725,7 +1741,7 @@ function setGateMode(mode) {
   document.querySelectorAll("#gateModes button").forEach(b => b.classList.toggle("active", b.dataset.mode === mode));
   document.querySelectorAll(".gate .su").forEach(el => el.classList.toggle("hidden", !su));
   $("#gateTitle").textContent = su ? "Create your account" : "Welcome back";
-  $("#gateSub").textContent = su ? "Join this Mandate workspace. You need its workspace key once; after that you sign in with your password."
+  $("#gateSub").textContent = su ? "Join this Mandate workspace. Ask a teammate for the invite code (it is in their account menu); after that you sign in with your password."
                                  : "Sign in to approve, deny and edit what your agents want to do.";
   $("#gateBtn").textContent = su ? "Create account" : "Sign in";
   $("#gatePass").autocomplete = su ? "new-password" : "current-password";
@@ -1744,7 +1760,7 @@ $("#gateForm").addEventListener("submit", async e => {
   e.preventDefault();
   const su = gateMode === "signup";
   const body = { username: $("#gateUser").value.trim(), password: $("#gatePass").value };
-  if (su) Object.assign(body, { name: $("#gateName").value.trim(), workspace_key: $("#gateKey").value.trim() });
+  if (su) Object.assign(body, { name: $("#gateName").value.trim(), invite_code: $("#gateKey").value.trim() });
   $("#gateBtn").disabled = true;
   try {
     const r = await fetch(su ? "/auth/signup" : "/auth/login", { method: "POST", credentials: "same-origin",
@@ -1760,10 +1776,24 @@ $("#gateForm").addEventListener("submit", async e => {
     $("#gateErr").textContent = err.message; $("#gateErr").classList.remove("hidden");
   } finally { $("#gateBtn").disabled = false; }
 });
-$("#userChip").addEventListener("click", async () => {
-  if (!state.user || !confirm(`Sign out of Mandate, ${state.user.name}?`)) return;
+$("#userChip").addEventListener("click", async e => {
+  e.stopPropagation();
+  if (!state.user) return;
+  const m = $("#acctMenu");
+  m.classList.toggle("hidden");
+  if (!m.classList.contains("hidden") && !state.invite) {
+    try { state.invite = (await api("/v1/invite-code")).invite_code; } catch { state.invite = ""; }
+  }
+  $("#acctInvite").textContent = state.invite || "unavailable";
+});
+document.addEventListener("click", e => { if (!e.target.closest(".acct")) $("#acctMenu").classList.add("hidden"); });
+$("#acctCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(state.invite || ""); toast("Invite code copied"); } catch { toast("Select the code and copy it"); }
+});
+$("#acctOut").addEventListener("click", async () => {
+  $("#acctMenu").classList.add("hidden");
   await fetch("/auth/logout", { method: "POST", credentials: "same-origin" }).catch(() => {});
-  state.user = null; state.agentKey = "";
+  state.user = null; state.agentKey = ""; state.invite = "";
   document.querySelectorAll(".card").forEach(c => c.remove());
   renderUser(); updateCount(); setGateMode("login"); showGate();
 });

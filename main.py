@@ -79,6 +79,13 @@ def _secret():
     return (os.environ.get("MANDATE_SESSION_SECRET") or os.environ.get("MANDATE_API_KEY", "")).encode()
 
 
+def invite_code():
+    """Workspace invite code for new accounts. Derived from the server secret, so it needs no
+    storage, survives redeploys, and is not the agent API key."""
+    h = hmac.new(_secret(), b"mandate-invite-v1", hashlib.sha256).hexdigest()[:12].upper()
+    return f"MND-{h[:4]}-{h[4:8]}-{h[8:]}"
+
+
 def make_session(username):
     payload = f"{username}|{int(time.time()) + SESSION_TTL}"
     sig = hmac.new(_secret(), payload.encode(), hashlib.sha256).hexdigest()
@@ -134,7 +141,7 @@ class SignupIn(BaseModel):
     username: str
     name: str
     password: str
-    workspace_key: str
+    invite_code: str
 
 
 class LoginIn(BaseModel):
@@ -164,10 +171,9 @@ def index(request: Request):
 
 @app.post("/auth/signup")
 async def signup(body: SignupIn, request: Request, response: Response):
-    """Creating an account needs the workspace API key once, like an invite code."""
-    expected = os.environ.get("MANDATE_API_KEY", "")
-    if not expected or not hmac.compare_digest(body.workspace_key.strip().encode(), expected.encode()):
-        raise HTTPException(403, "that workspace key is not valid")
+    """Creating an account needs the workspace invite code (shown to signed-in people)."""
+    if not _secret() or not hmac.compare_digest(body.invite_code.strip().upper().encode(), invite_code().encode()):
+        raise HTTPException(403, "that invite code is not valid")
     try:
         user = await run_in_threadpool(core.create_user, body.username, body.name, body.password)
     except ValueError as e:
@@ -207,6 +213,14 @@ async def connect_info(who: dict = Depends(require_key)):
     if who["kind"] != "user":
         raise HTTPException(403, "only signed-in people can view the agent key")
     return {"api_key": os.environ.get("MANDATE_API_KEY", "")}
+
+
+@app.get("/v1/invite-code")
+async def get_invite_code(who: dict = Depends(require_key)):
+    """The invite code teammates need to create an account. Only for signed-in people."""
+    if who["kind"] != "user":
+        raise HTTPException(403, "only signed-in people can view the invite code")
+    return {"invite_code": invite_code()}
 
 
 HOOK_FILES = {"claude_code_hook.py", "cursor_hook.py"}

@@ -914,6 +914,11 @@ def _seed():
            json.dumps({"action_type": "write_file",
                        "conds": [{"field": "file_path", "op": "matches", "value": "config/payments/*"}]}),
            "never_allow", "seed", 0, 1, now))
+    _exec("INSERT INTO rules VALUES (?,?,?,?,?,?,?,?)",
+          ("no-payment-config-shell", "Never let agents touch payment config from the shell",
+           json.dumps({"action_type": "run_command",
+                       "conds": [{"field": "command", "op": "contains", "value": "config/payments"}]}),
+           "never_allow", "seed", 0, 1, now))
 
     # (agent, action, payload, context, reasoning, status, decided_by, hours_ago, latency_s, final)
     history = [
